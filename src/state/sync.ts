@@ -16,6 +16,9 @@ const sameMessage = (left: Message, right: Message): boolean =>
   left.status === right.status &&
   left.error === right.error;
 
+const sameIds = (left: readonly string[], right: readonly string[]): boolean =>
+  left.length === right.length && left.every((id, index) => id === right[index]);
+
 const sameProvider = (left: Provider, right: Provider): boolean =>
   left.name === right.name &&
   left.baseURL === right.baseURL &&
@@ -91,6 +94,14 @@ export function diffState(
   }
   for (const id of oldAgents.keys()) {
     ops.push({ kind: "agent.delete", id });
+  }
+
+  for (const providerId of Object.keys(next.models)) {
+    const models = next.models[providerId];
+    const previous = base.models[providerId];
+    if (previous === undefined || !sameIds(previous, models)) {
+      ops.push({ kind: "models", providerId, models });
+    }
   }
 
   if (base.currentId !== next.currentId) {

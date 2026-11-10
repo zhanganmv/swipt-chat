@@ -151,7 +151,7 @@ v13 曾把抽屉的出现方式放在 RN 侧自己实现（`Animated` 滑入 260
 | 插件（MCP）`/plugins` | 顶栏「插件」；两段：已连接 / 可添加；行：服务名 + 状态点（绿/灰/红）+ 工具数；详情页：工具列表（每行名称 + 开关）、连接信息、删除 |
 | 设置根（v27 现状） | 一个 `NavigationDestination value="settings"` 的系统页面：`Toolbar` 里只放 `List`（`insetGrouped`）+ `navigationTitle("设置")` + inline 标题；左上角返回箭头**由系统栈提供**（v20 起不再放自绘返回）。分组只有 **对话**（模型服务、智能体，右侧显示数量）与 **能力**（工具、MCP 服务、技能）；「通用」「关于」已按用户要求删除（v17）。每行是 `Label`（SF Symbol）+ 右侧值，chevron 由系统给 |
 | 设置二级页（v27 现状） | 每个能力都是 `NavigationDestination` 推入的系统页面，自带导航栏、返回箭头、滚动边缘材质。模型服务页是**列表**：当前项打勾、行内 `ContextMenu`（设为当前 / 删除），右上角 `+`；智能体页同构（轻点切当前、长按删除、右上角 +）。工具 / MCP / 技能三页先给占位与批次说明，「添加」弹 `Alert` |
-| 模型服务表单（v17 起抽屉） | 不再是推入页，而是底部抽屉 `ProviderSheet`（`SheetShell` + `Form`）：名称、接口地址（url 键盘）、模型名、API Key 四个 `TextField` + 「流式输出」`Toggle`；`ToolbarItem topBarLeading` 取消、`topBarTrailing` 保存（地址或模型为空时置灰）。关闭时先播系统 dismissing 动画，再卸载（`useSheetLifecycle`），且关闭不清空记录，避免滑出时字段闪白 |
+| 模型服务表单（v17 起抽屉，v29 加模型目录） | 底部抽屉 `ProviderSheet`（`SheetShell` + `Form`）：第一段名称、接口地址（url 键盘）、API Key；第二段模型——模型名 `TextField`、`Menu`「选择模型」（预置目录 + 已拉取的 id，按 baseURL 命中预置）、「测试连接并拉取模型」按钮（同时是连通性自检，结果一行提示：`连接正常 · N 个模型` 或分类后的错误）；第三段「流式输出」`Toggle`。`ToolbarItem topBarLeading` 取消、`topBarTrailing` 保存（地址或模型为空时置灰）。关闭时先播系统 dismissing 动画，再卸载（`useSheetLifecycle`），且关闭不清空记录，避免滑出时字段闪白 |
 | 会话列表 | 不占整页：底部抽屉，见 §3 |
 | Provider 列表（v27 现状） | 见「设置二级页」一行：列表 + 右上角「添加」+ 行内菜单；模型/密钥/流式都在抽屉表单里一次填完，不再有 `providerEdit` 推入页 |
 | 会话搜索 | 顶栏搜索框（圆角 12、`card` 底）+ 结果按会话分组，关键词高亮 |

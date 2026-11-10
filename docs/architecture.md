@@ -63,11 +63,13 @@
 | `provider` | 服务 `{id,name,base_url,model,stream}`，**没有 api_key 列** |
 | `provider_secret` | `{provider_id,api_key}`，主键即外键，删服务时级联删密钥 |
 | `agent` | `{id,title}` |
+| `model` | `{provider_id,model_id}`，服务拉取的模型 id 缓存，`provider_id` 级联删除；v2 迁移加入 |
 | `app_state` | 键值：`current_session` / `active_provider` / `active_agent` / `draft` / `fts5` |
 
 - **迁移**：`PRAGMA user_version` 是唯一版本标记，`schema.ts` 的 `MIGRATIONS` 只追加、不改历史版本；每条迁移在一个事务里执行，失败回滚。启动时 `PRAGMA foreign_keys = ON`，并尝试 `journal_mode = WAL`（宿主不支持时只是回到默认日志模式，不致命）。
 - **写库**：状态变化后 `sync.ts` 与「上次落库的状态」做 diff，只产生变化的行（一条流式 token = 1 条 message 更新 + 1 条 session 时间），300ms 防抖后**一个事务**提交；切后台/卸载强制 flush。写操作串行排队；失败时把 diff base 退回上一次成功点，下次重试（所有 op 都是幂等 upsert/delete）。
 - **中断回复修复保留**：读到 `status === "streaming"` 说明进程在生成中被回收 —— 空内容 → `error` + `生成已中断`，有内容 → `done`。
+- **模型目录**：`src/domain/catalog.ts` 是纯数据的预置表（按 baseURL 的 host 命中），`requestModels` 打 `GET /models` 并当作连通性自检；拉到的 id 以 `models` op 整表替换缓存，读时按 id 排序。
 - **FTS5**：`detectFts5()` 在 `temp` schema 建一张探测表再删掉，结果写 `app_state.fts5`（`"1"`/`"0"`）；P6 的搜索据此选 FTS5 或 `LIKE`，没有 FTS5 也能用。
 - 打开失败（宿主缺 `expo-sqlite` 桥）不阻塞聊天：本次运行退化为纯内存，只写一行日志。
 
@@ -81,7 +83,7 @@
 
 ## 7. 测试口径
 
-- `npm test` 跑 `node --experimental-strip-types scripts/check.ts`，当前 **93 条断言**，覆盖 reducer 全分支、SSE/UTF-8、错误分类、迁移与恢复（含 providers/agents 两个列表、密钥拆分、activeId 失效回落）。存储层直接跑真 SQLite（`node:sqlite`，同一套 SQL 方言），不是 JSON 假件：迁移幂等、级联删除、流式 token 只改一行、中断回复修复都有断言。
+- `npm test` 跑 `node --experimental-strip-types scripts/check.ts`，当前 **107 条断言**，覆盖 reducer 全分支、SSE/UTF-8、错误分类、迁移与恢复（含 providers/agents 两个列表、密钥拆分、activeId 失效回落）。存储层直接跑真 SQLite（`node:sqlite`，同一套 SQL 方言），不是 JSON 假件：迁移幂等、级联删除、流式 token 只改一行、中断回复修复都有断言。
 - 断言用 `canon()` 规范化比较（键排序），不用裸 `JSON.stringify`——键序不该让测试变红。
 - 为了让 node 直接加载 ESM，`src/**` 的相对 import 一律写显式扩展名（`./x.ts` / `./x.tsx`），`tsconfig.json` 打开 `allowImportingTsExtensions`（配合 `noEmit`）。新增文件请沿用，否则 `npm test` 会报 `ERR_MODULE_NOT_FOUND`。
 - 纯模块才进测试；`useChat` 依赖 React，不在本机跑，真机验。

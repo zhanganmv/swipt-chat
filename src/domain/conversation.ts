@@ -29,6 +29,8 @@ export interface ChatState {
   /** Every configured service; the chat uses whichever `providerId` names. */
   providers: Provider[];
   providerId: string | null;
+  /** Model ids the services reported, keyed by provider id. */
+  models: Record<string, string[]>;
   turn: Turn | null;
   sheetOpen: boolean;
 }
@@ -43,6 +45,7 @@ export type ChatAction =
       providerId: string | null;
       agents: Agent[];
       agentId: string | null;
+      models?: Record<string, string[]>;
     }
   | { type: "draft"; text: string }
   | { type: "select"; id: string }
@@ -57,6 +60,7 @@ export type ChatAction =
   | { type: "providerUpdate"; provider: Provider }
   | { type: "providerRemove"; id: string }
   | { type: "providerSelect"; id: string }
+  | { type: "models"; providerId: string; models: string[] }
   | {
       type: "begin";
       conversationId: string;
@@ -91,6 +95,7 @@ export function initialState(
     agentId: agents[0]?.id ?? "default",
     providers,
     providerId: providers[0]?.id ?? null,
+    models: {},
     turn: null,
     sheetOpen: false,
   };
@@ -156,6 +161,7 @@ export function reduce(state: ChatState, action: ChatAction): ChatState {
         providerId: action.providerId,
         agents: action.agents.length === 0 ? state.agents : action.agents,
         agentId: action.agentId ?? state.agentId,
+        models: action.models ?? {},
       };
 
     case "draft":
@@ -237,11 +243,29 @@ export function reduce(state: ChatState, action: ChatAction): ChatState {
       if (providers.length === state.providers.length) {
         return state;
       }
+      const models = { ...state.models };
+      delete models[action.id];
       return {
         ...state,
         providers,
+        models,
         providerId:
           state.providerId === action.id ? (providers[0]?.id ?? null) : state.providerId,
+      };
+    }
+
+    case "models": {
+      const previous = state.models[action.providerId];
+      if (
+        previous !== undefined &&
+        previous.length === action.models.length &&
+        previous.every((id, index) => id === action.models[index])
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        models: { ...state.models, [action.providerId]: action.models },
       };
     }
 

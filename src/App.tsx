@@ -218,8 +218,14 @@ function Shell() {
       <ProviderSheet
         visible={providerOpen}
         provider={providerForm?.provider ?? null}
+        models={
+          providerForm?.provider == null
+            ? []
+            : (state.models[providerForm.provider.id] ?? [])
+        }
         onClose={closeProviderForm}
         onSave={saveProvider}
+        onFetchModels={actions.fetchModels}
       />
 
       <AgentSheet

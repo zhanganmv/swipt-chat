@@ -16,7 +16,7 @@
  */
 import type { SqlDriver } from "./sql.ts";
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export interface Migration {
   version: number;
@@ -71,7 +71,24 @@ const V1 = [
    )`,
 ] as const;
 
-export const MIGRATIONS: readonly Migration[] = [{ version: 1, statements: V1 }];
+/**
+ * v2: the model list each service reported (from `GET /models`), cached so the
+ * form opens with the last known ids instead of an empty picker.
+ */
+const V2 = [
+  `CREATE TABLE model (
+     provider_id TEXT NOT NULL
+       REFERENCES provider(id) ON DELETE CASCADE,
+     model_id TEXT NOT NULL,
+     created_at INTEGER NOT NULL,
+     PRIMARY KEY (provider_id, model_id)
+   )`,
+] as const;
+
+export const MIGRATIONS: readonly Migration[] = [
+  { version: 1, statements: V1 },
+  { version: 2, statements: V2 },
+];
 
 const ignore = (thrown: unknown): void => {
   void thrown;

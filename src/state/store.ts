@@ -7,7 +7,7 @@
  * the rows that changed, applied in one transaction.
  *
  * The mapping — row to domain object and back — lives in this file and is
- * platform-free; `deviceStore.ts` supplies the `expo-sqlite` driver, and
+ * platform-free; `deviceSql.ts` supplies the `expo-sqlite` driver, and
  * `scripts/check.ts` runs these same functions against `node:sqlite`.
  */
 import { normalizeProvider } from "../domain/provider.ts";
@@ -36,6 +36,8 @@ export interface Snapshot {
   providerId: string | null;
   agents: Agent[];
   agentId: string | null;
+  /** Model ids each service reported, keyed by provider id. */
+  models: Record<string, string[]>;
 }
 
 export const emptySnapshot = (): Snapshot => ({
@@ -46,6 +48,7 @@ export const emptySnapshot = (): Snapshot => ({
   providerId: null,
   agents: [],
   agentId: null,
+  models: {},
 });
 
 export type StoreOp =
@@ -56,6 +59,7 @@ export type StoreOp =
   | { kind: "provider.delete"; id: string }
   | { kind: "agent"; agent: Agent }
   | { kind: "agent.delete"; id: string }
+  | { kind: "models"; providerId: string; models: readonly string[] }
   | { kind: "state"; key: StateKey; value: string | null };
 
 interface SessionRow {
@@ -163,6 +167,18 @@ export async function loadSnapshot(driver: SqlDriver): Promise<Snapshot> {
     title: row.title,
   }));
 
+  const models: Record<string, string[]> = {};
+  for (const row of await driver.all<{ provider_id: string; model_id: string }>(
+    "SELECT provider_id, model_id FROM model ORDER BY provider_id, model_id",
+  )) {
+    const list = models[row.provider_id];
+    if (list === undefined) {
+      models[row.provider_id] = [row.model_id];
+    } else {
+      list.push(row.model_id);
+    }
+  }
+
   const state = new Map<string, string>();
   for (const row of await driver.all<{ key: string; value: string }>(
     "SELECT key, value FROM app_state",
@@ -196,6 +212,7 @@ export async function loadSnapshot(driver: SqlDriver): Promise<Snapshot> {
     providerId,
     agents,
     agentId,
+    models,
   };
 }
 
@@ -310,6 +327,19 @@ const applyOp = async (driver: SqlDriver, op: StoreOp): Promise<void> => {
 
     case "agent.delete":
       await driver.run("DELETE FROM agent WHERE id = ?", [op.id]);
+      return;
+
+    case "models":
+      // Replace, not merge: a model the service stopped offering must go away,
+      // otherwise the picker keeps proposing it forever.
+      await driver.run("DELETE FROM model WHERE provider_id = ?", [op.providerId]);
+      for (const id of op.models) {
+        await driver.run(
+          `INSERT INTO model (provider_id, model_id, created_at) VALUES (?, ?, ?)
+           ON CONFLICT(provider_id, model_id) DO NOTHING`,
+          [op.providerId, id, Date.now()],
+        );
+      }
       return;
 
     case "state":

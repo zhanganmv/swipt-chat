@@ -2,15 +2,23 @@ import { Client } from "@swipt/api/http";
 
 import type { Message, Provider } from "../domain/types.ts";
 import { ChatFailure } from "./errors.ts";
-import { bodyOf, endpointOf, headersOf } from "./openai.ts";
+import {
+  bodyOf,
+  endpointOf,
+  headersOf,
+  modelIdsOf,
+  modelsEndpointOf,
+} from "./openai.ts";
 
 /**
- * The one place a chat request is actually sent.
+ * The one place a request is actually sent.
  *
  * Kept apart from the wire format so the format stays testable: everything here
  * needs the Swipt host, nothing in `openai.ts` does.
  */
 const REQUEST_TIMEOUT_MS = 30000;
+/** Listing models is a health check as much as a query: fail fast. */
+const MODELS_TIMEOUT_MS = 15000;
 
 interface Guard {
   signal: AbortSignal;
@@ -81,6 +89,45 @@ export async function requestChat(
       throw new ChatFailure({
         kind: "timeout",
         detail: `${REQUEST_TIMEOUT_MS / 1000}s 内没有响应`,
+      });
+    }
+    throw thrown;
+  } finally {
+    guard.release();
+  }
+}
+
+/**
+ * List the models a service exposes, which doubles as the connectivity probe:
+ * a wrong address, key or a service that cannot speak OpenAI all fail here,
+ * before the user has typed anything into the chat.
+ */
+export async function requestModels(
+  provider: Provider,
+  signal: AbortSignal | undefined,
+): Promise<string[]> {
+  const client = new Client();
+  const guard = guardOf(signal, MODELS_TIMEOUT_MS);
+  try {
+    const response = await client.fetch(modelsEndpointOf(provider), {
+      method: "GET",
+      headers: headersOf(provider),
+      signal: guard.signal,
+    });
+    if (!response.ok) {
+      const detail = await response.text().catch(() => "");
+      throw new ChatFailure({
+        kind: "http",
+        status: response.status,
+        detail: detail.trim(),
+      });
+    }
+    return modelIdsOf(await response.text());
+  } catch (thrown) {
+    if (guard.timedOut()) {
+      throw new ChatFailure({
+        kind: "timeout",
+        detail: `${MODELS_TIMEOUT_MS / 1000}s 内没有响应`,
       });
     }
     throw thrown;

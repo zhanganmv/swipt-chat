@@ -21,7 +21,10 @@ import {
   completionOf,
   endpointOf,
   headersOf,
+  modelIdsOf,
+  modelsEndpointOf,
 } from "../src/api/openai.ts";
+import { suggestedModels, uniqueModels } from "../src/domain/catalog.ts";
 import {
   SCHEMA_VERSION,
   detectFts5,
@@ -364,6 +367,35 @@ check(
   endpointOf(provider),
   "https://api.example.com/v1/chat/completions",
 );
+check(
+  "openai: the models endpoint sits beside the chat endpoint",
+  modelsEndpointOf(provider),
+  "https://api.example.com/v1/models",
+);
+check(
+  "openai: model ids come from the data array",
+  modelIdsOf('{"data":[{"id":"a"},{"id":"b"}]}'),
+  ["a", "b"],
+);
+check(
+  "openai: duplicate and unusable model ids are dropped",
+  modelIdsOf('{"data":[{"id":"a"},{"id":"a"},{"id":""},{"name":"x"},null]}'),
+  ["a"],
+);
+const parseFailure = (text: string): string => {
+  try {
+    modelIdsOf(text);
+    return "no failure";
+  } catch (thrown) {
+    return normalizeFailure(thrown).kind;
+  }
+};
+check("openai: malformed model list is a parse failure", parseFailure("not json"), "parse");
+check(
+  "openai: a body without a data array is a parse failure",
+  parseFailure('{"models":[]}'),
+  "parse",
+);
 check("openai: auth header", headersOf(provider).authorization, "Bearer sk-1");
 check(
   "openai: body has only role and content",
@@ -440,6 +472,22 @@ check(
   0,
 );
 
+check(
+  "catalog: a known host brings its models",
+  suggestedModels("https://api.deepseek.com/v1"),
+  ["deepseek-chat", "deepseek-reasoner"],
+);
+check(
+  "catalog: an unknown host suggests nothing",
+  suggestedModels("https://example.test/v1"),
+  [],
+);
+check(
+  "catalog: presets come before fetched ids, duplicates once",
+  uniqueModels([["deepseek-chat"], ["deepseek-chat", "custom"]]),
+  ["deepseek-chat", "custom"],
+);
+
 const chat: ChatState = {
   hydrated: true,
   conversations: [
@@ -459,6 +507,7 @@ const chat: ChatState = {
   providerId: "p1",
   agents: [{ id: "default", title: "Swipt Chat" }],
   agentId: "default",
+  models: {},
   turn: null,
   sheetOpen: false,
 };
@@ -483,6 +532,7 @@ check("db: round-trip through rows", await loadSnapshot(db), {
   providerId: "p1",
   agents: chat.agents,
   agentId: "default",
+  models: {},
 } satisfies Snapshot);
 
 check(
@@ -596,7 +646,51 @@ check(
   "草稿",
 );
 
+await applyOps(db, [
+  { kind: "models", providerId: "p1", models: ["b-model", "a-model"] },
+]);
+check(
+  "db: probed models are cached per service",
+  (await loadSnapshot(db)).models,
+  { p1: ["a-model", "b-model"] },
+);
+check(
+  "sync: a changed model list is one op",
+  diffState(chat, { ...chat, models: { p1: ["a-model"] } }).map((op) => op.kind),
+  ["models"],
+);
+check(
+  "sync: an unchanged model list writes nothing",
+  diffState({ ...chat, models: { p1: ["a"] } }, { ...chat, models: { p1: ["a"] } }),
+  [],
+);
+
+const withModels = reduce(chat, {
+  type: "models",
+  providerId: "p1",
+  models: ["m1", "m2"],
+});
+check("state: a probe result is stored per service", withModels.models, {
+  p1: ["m1", "m2"],
+});
+check(
+  "state: the same list twice is not a new state",
+  reduce(withModels, { type: "models", providerId: "p1", models: ["m1", "m2"] }) ===
+    withModels,
+  true,
+);
+check(
+  "state: removing a service drops its models",
+  reduce(withModels, { type: "providerRemove", id: "p1" }).models,
+  {},
+);
+
 await applyOps(db, [{ kind: "provider.delete", id: "p1" }]);
+check(
+  "db: deleting a service drops its models",
+  (await db.first<{ n: number }>("SELECT count(*) AS n FROM model"))?.n,
+  0,
+);
 check(
   "db: deleting a provider drops its key",
   (await db.first<{ n: number }>(

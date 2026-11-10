@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
 import { AppState } from "react-native";
 
 import { describeFailure, normalizeFailure } from "../api/errors.ts";
+import { requestModels } from "../api/request.ts";
 import { runTurn } from "../api/turn.ts";
 import {
   initialState,
@@ -46,6 +47,12 @@ export interface ChatActions {
   saveProvider(provider: Provider): void;
   removeProvider(id: string): void;
   selectProvider(id: string): void;
+  /**
+   * Lists the service's models and caches them. Doubles as the connectivity
+   * probe: it throws a classified failure when the address or key is wrong.
+   * An unsaved service (`id === ""`) is not cached — there is no row yet.
+   */
+  fetchModels(provider: Provider): Promise<string[]>;
 }
 
 export interface UseChat {
@@ -145,6 +152,7 @@ export function useChat(): UseChat {
         providerId: snapshot?.providerId ?? null,
         agents: snapshot?.agents ?? [],
         agentId: snapshot?.agentId ?? null,
+        models: snapshot?.models ?? {},
       });
     })();
     return () => {
@@ -353,6 +361,15 @@ export function useChat(): UseChat {
     dispatch({ type: "providerSelect", id });
   }, []);
 
+  const fetchModels = useCallback(async (provider: Provider): Promise<string[]> => {
+    const ids = await requestModels(provider, undefined);
+    void logLine(`models: ${provider.baseURL} ${ids.length}`);
+    if (provider.id !== "") {
+      dispatch({ type: "models", providerId: provider.id, models: ids });
+    }
+    return ids;
+  }, []);
+
   const actions = useMemo<ChatActions>(
     () => ({
       send,
@@ -369,6 +386,7 @@ export function useChat(): UseChat {
       saveProvider,
       removeProvider,
       selectProvider,
+      fetchModels,
     }),
     [
       addAgent,
@@ -379,6 +397,7 @@ export function useChat(): UseChat {
       removeProvider,
       renameSession,
       saveProvider,
+      fetchModels,
       selectAgent,
       selectProvider,
       send,
