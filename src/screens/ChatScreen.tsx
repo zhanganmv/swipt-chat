@@ -20,6 +20,7 @@ import { ChatHeader } from "../shell/ChatHeader.tsx";
 import { ComposerToolbar, JumpToBottom } from "../shell/ComposerToolbar.tsx";
 
 const STICK_THRESHOLD = 80;
+const keyOf = (item: Message) => item.id;
 /** Height of the floating glass toolbar; the transcript starts below it. */
 const HEADER_HEIGHT = 48;
 
@@ -63,24 +64,51 @@ export const ChatScreen = memo(function ChatScreen({
   const { colors, type } = useTheme();
   const list = useRef<FlatList<Message>>(null);
   const [atBottom, setAtBottom] = useState(true);
+  // Mirrors `atBottom` for the callbacks below: they must read the latest value
+  // without being recreated, or the scroll handler alone would re-render the
+  // whole transcript on every frame.
+  const atBottomRef = useRef(true);
+
   const scrollToEnd = useCallback((animated = true) => {
-    requestAnimationFrame(() =>
-      list.current?.scrollToEnd({ animated }),
-    );
+    requestAnimationFrame(() => list.current?.scrollToEnd({ animated }));
   }, []);
 
-  useEffect(() => {
-    if (atBottom) {
-      scrollToEnd();
+  /**
+   * Follow the stream only when the *content* grows, never when the user moves.
+   *
+   * This used to be `useEffect(..., [atBottom, messages])` with an animated
+   * scroll: every token batch (20/s) restarted an animation, and reaching the
+   * bottom by hand also fired it — a scroll animation fighting the user's own
+   * inertia is the "slows down and rubber-bands at the bottom" report. Now the
+   * only trigger is a content-size change, and without animation: it is a jump
+   * to the newest line, not a gesture that can steal momentum.
+   */
+  const onContentSizeChange = useCallback(() => {
+    if (atBottomRef.current) {
+      scrollToEnd(false);
     }
-  }, [atBottom, messages, scrollToEnd]);
+  }, [scrollToEnd]);
 
-  const onScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
-    const distance =
-      contentSize.height - (contentOffset.y + layoutMeasurement.height);
-    setAtBottom(distance < STICK_THRESHOLD);
-  }, []);
+  const onScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+      const distance =
+        contentSize.height - (contentOffset.y + layoutMeasurement.height);
+      const next = distance < STICK_THRESHOLD;
+      if (next !== atBottomRef.current) {
+        atBottomRef.current = next;
+        setAtBottom(next);
+      }
+    },
+    [],
+  );
+
+  // Stable across renders: without this the row component is rebuilt on every
+  // streamed batch and FlatList re-renders every visible message.
+  const renderItem = useCallback(
+    ({ item }: { item: Message }) => <MessageRow message={item} />,
+    [],
+  );
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
@@ -98,18 +126,26 @@ export const ChatScreen = memo(function ChatScreen({
             messages.length === 0 ? styles.listContentEmpty : null,
           ]}
           data={messages}
-          keyExtractor={(item) => item.id}
+          keyExtractor={keyOf}
+          onContentSizeChange={onContentSizeChange}
           onScroll={onScroll}
           scrollEventThrottle={16}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="interactive"
-          renderItem={({ item }) => <MessageRow message={item} />}
+          renderItem={renderItem}
           ListEmptyComponent={
             <EmptyState modelLabel={modelLabel} onPick={onOpenModelSettings} />
           }
         />
 
-        {atBottom ? null : <JumpToBottom bottom={12} onPress={() => scrollToEnd()} />}
+        {/* Always mounted and merely faded out: mounting or unmounting a
+            native `Host` in the frame where the list reaches the bottom was a
+            visible hitch right at the end of the scroll. */}
+        <JumpToBottom
+          bottom={12}
+          hidden={atBottom}
+          onPress={() => scrollToEnd()}
+        />
       </View>
 
       <View pointerEvents="box-none" style={styles.headerWrap}>
@@ -164,7 +200,7 @@ export const ChatScreen = memo(function ChatScreen({
   );
 });
 
-function MessageRow({ message }: { message: Message }) {
+const MessageRow = memo(function MessageRow({ message }: { message: Message }) {
   const { colors, type } = useTheme();
 
   if (message.role === "user") {
@@ -199,7 +235,7 @@ function MessageRow({ message }: { message: Message }) {
       ) : null}
     </View>
   );
-}
+});
 
 function TypingDots() {
   const { colors } = useTheme();

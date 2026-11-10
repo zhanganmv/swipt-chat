@@ -208,22 +208,27 @@ export const ComposerToolbar = memo(function ComposerToolbar({
  */
 export function JumpToBottom({
   bottom,
+  hidden = false,
   onPress,
 }: {
-  /** Distance from the bottom edge; the chat passes the composer's height. */
+  /** Distance from the bottom edge of the transcript area. */
   bottom: number;
+  /** Fade out instead of unmounting: see the note in `ChatScreen`. */
+  hidden?: boolean;
   onPress: () => void;
 }) {
   const { colors } = useTheme();
 
   return (
     <View
+      pointerEvents={hidden ? "none" : "auto"}
       style={{
         position: "absolute",
         alignSelf: "center",
         bottom,
         width: 36,
         height: 36,
+        opacity: hidden ? 0 : 1,
       }}
     >
       <Host style={{ flex: 1 }}>
