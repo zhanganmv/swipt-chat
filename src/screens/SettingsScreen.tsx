@@ -1,16 +1,14 @@
 import { memo, useState } from "react";
-import { Alert, View } from "react-native";
+import { Alert } from "react-native";
 import {
   Button,
   ContextMenu,
-  Host,
   HStack,
   Image,
   Label,
   List,
   NavigationDestination,
   NavigationLink,
-  NavigationStack,
   Section,
   Spacer,
   Text,
@@ -32,12 +30,16 @@ import {
 } from "@expo/ui/swift-ui/modifiers";
 
 import { providerNameOf } from "../domain/provider.ts";
-import { NavBackButton } from "../shell/GlassControls.tsx";
 import type { Agent, Provider } from "../domain/types.ts";
 import { useTheme } from "../theme/index.tsx";
 
 /**
- * Settings, all native.
+ * Settings, all native — the settings half of the app's single `NavigationStack`.
+ *
+ * These are `NavigationDestination`s, not a stack of their own: the shell owns
+ * one `NavigationStack` whose root is the chat (`App.tsx`), so pushing settings
+ * gives the host's swipe-to-dismiss rule the depth it looks for and the system
+ * interactive pop returns to the chat (`docs/ui-spec.md` §12).
  *
  * Shape of every capability page (v17, from the "设置界面混乱" report): one
  * `List` of rows, 添加 in the top-right corner of the navigation bar, and the
@@ -48,13 +50,12 @@ import { useTheme } from "../theme/index.tsx";
  * Memoized: a streamed chat token must not rebuild this `Host` tree while the
  * page is hidden behind the chat.
  */
-export const SettingsScreen = memo(function SettingsScreen({
+export const SettingsPages = memo(function SettingsPages({
   providers,
   agents,
   providerId,
   agentId,
   sessionCount,
-  onBack,
   onAddProvider,
   onEditProvider,
   onDeleteProvider,
@@ -62,15 +63,12 @@ export const SettingsScreen = memo(function SettingsScreen({
   onAddAgent,
   onDeleteAgent,
   onSelectAgent,
-  path,
-  onPathChange,
 }: {
   providers: Provider[];
   agents: Agent[];
   providerId: string | null;
   agentId: string | null;
   sessionCount: number;
-  onBack: () => void;
   onAddProvider: () => void;
   onEditProvider: (provider: Provider) => void;
   onDeleteProvider: (id: string) => void;
@@ -78,17 +76,13 @@ export const SettingsScreen = memo(function SettingsScreen({
   onAddAgent: () => void;
   onDeleteAgent: (id: string) => void;
   onSelectAgent: (id: string) => void;
-  /** Native navigation path, owned by the shell so it knows the depth. */
-  path: string[];
-  onPathChange: (next: string[]) => void;
 }) {
   const { colors } = useTheme();
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <Host style={{ flex: 1 }}>
-        <NavigationStack path={path} onPathChange={onPathChange}>
-          <Toolbar>
+    <>
+      <NavigationDestination value="settings">
+        <Toolbar>
             <List
               modifiers={[
                 listStyle("insetGrouped"),
@@ -120,14 +114,10 @@ export const SettingsScreen = memo(function SettingsScreen({
                 <Row value="skills" title="技能" icon="sparkles" />
               </Section>
             </List>
-            <Toolbar.Content>
-              <ToolbarItem placement="topBarLeading">
-                <NavBackButton label="返回聊天" onPress={onBack} />
-              </ToolbarItem>
-            </Toolbar.Content>
           </Toolbar>
+      </NavigationDestination>
 
-          <NavigationDestination value="providers">
+      <NavigationDestination value="providers">
             <Toolbar>
               <List
                 modifiers={[
@@ -305,9 +295,7 @@ export const SettingsScreen = memo(function SettingsScreen({
               batch="P5"
             />
           </NavigationDestination>
-        </NavigationStack>
-      </Host>
-    </View>
+    </>
   );
 });
 
