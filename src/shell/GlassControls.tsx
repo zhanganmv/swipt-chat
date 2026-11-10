@@ -30,9 +30,11 @@ import { useTheme } from "../theme/index.tsx";
  * 40pt circle and a 40pt capsule line up on the same centre line (v18: the chip
  * was aligned by the Menu, whose own metrics differ from a Button's).
  *
- * Glass — `interactive: true` was removed in v14: interactive glass installs its
- * own press gesture on top of the button and delays the action. The plain visual
- * variant has no gesture, so the button keeps a normal tap.
+ * Glass — `interactive: true` is what gives a control the liquid press effect,
+ * and it must sit on the label for the same reason as the frame: on the label it
+ * merges with the button's own gesture, while on the button it installed a
+ * second one and delayed the action (v14). v20 turned it back on after the
+ * sizing fix moved the glass inward — the user asked for the press animation.
  */
 export const GLASS_CONTROL_SIZE = 40;
 /** Copy the chat toolbar's glyph size so a nav-bar arrow matches it exactly. */
@@ -40,8 +42,14 @@ export const GLASS_ICON_SIZE = 17;
 /** Wide enough for a readable name, narrow enough to leave room for the icons. */
 export const AGENT_CHIP_MAX_WIDTH = 150;
 
-const glassCircle = glassEffect({ glass: { variant: "regular" }, shape: "circle" });
-const glassCapsule = glassEffect({ glass: { variant: "regular" }, shape: "capsule" });
+const glassCircle = glassEffect({
+  glass: { variant: "regular", interactive: true },
+  shape: "circle",
+});
+const glassCapsule = glassEffect({
+  glass: { variant: "regular", interactive: true },
+  shape: "capsule",
+});
 
 export function GlassButton({
   systemImage,

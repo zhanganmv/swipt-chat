@@ -1,6 +1,11 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState, type ReactElement } from "react";
 import { StyleSheet, View } from "react-native";
 import { Host, NavigationStack, RNHostView } from "@expo/ui/swift-ui";
+import {
+  background,
+  ignoreSafeArea,
+  type ViewModifier,
+} from "@expo/ui/swift-ui/modifiers";
 
 import type { Provider } from "./domain/types.ts";
 import { ChatScreen } from "./screens/ChatScreen.tsx";
@@ -10,6 +15,15 @@ import { ProviderSheet } from "./shell/ProviderSheet.tsx";
 import { SessionListSheet, type SessionRow } from "./shell/SessionListSheet.tsx";
 import { useChat } from "./state/useChat.ts";
 import { ThemeProvider, useTheme } from "./theme/index.tsx";
+
+/**
+ * `RNHostView` accepts modifiers at runtime (every expo/ui native view does),
+ * but its TypeScript props do not declare them.
+ */
+const HostedChat = RNHostView as unknown as (props: {
+  children: ReactElement;
+  modifiers?: ViewModifier[];
+}) => ReactElement;
 
 export default function App() {
   return (
@@ -94,11 +108,21 @@ function Shell() {
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
-      <Host style={styles.host}>
-        <NavigationStack path={path} onPathChange={setPath}>
+      {/* The host fills the window, so painting it too keeps the status-bar and
+          home-indicator strips the same colour as the chat. */}
+      <Host style={styles.host} modifiers={[background(colors.background)]}>
+        <NavigationStack
+          path={path}
+          onPathChange={setPath}
+          modifiers={[background(colors.background)]}
+        >
           {/* Root page. The chat stays React Native; everything the stack draws
               around it (bars, the interactive pop, the tint) is native. */}
-          <RNHostView>
+          {/* `ignoreSafeArea(.keyboard)`: SwiftUI's own keyboard avoidance shifts
+              the hosted view up, and the chat already lifts its composer by the
+              measured overlap — together they threw the input to the top of the
+              screen. The chat keeps sole control of the keyboard. */}
+          <HostedChat modifiers={[ignoreSafeArea({ regions: "keyboard" })]}>
             <ChatScreen
               agentId={state.agentId}
               agents={state.agents}
@@ -116,7 +140,7 @@ function Shell() {
               onOpenSettings={openSettings}
               onOpenModelSettings={openSettings}
             />
-          </RNHostView>
+          </HostedChat>
 
           <SettingsPages
             providers={state.providers}
