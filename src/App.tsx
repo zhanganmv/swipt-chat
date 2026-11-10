@@ -1,11 +1,7 @@
-import { useCallback, useMemo, useState, type ReactElement } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { Host, NavigationStack, RNHostView } from "@expo/ui/swift-ui";
-import {
-  background,
-  ignoreSafeArea,
-  type ViewModifier,
-} from "@expo/ui/swift-ui/modifiers";
+import { background } from "@expo/ui/swift-ui/modifiers";
 
 import type { Provider } from "./domain/types.ts";
 import { ChatScreen } from "./screens/ChatScreen.tsx";
@@ -15,15 +11,6 @@ import { ProviderSheet } from "./shell/ProviderSheet.tsx";
 import { SessionListSheet, type SessionRow } from "./shell/SessionListSheet.tsx";
 import { useChat } from "./state/useChat.ts";
 import { ThemeProvider, useTheme } from "./theme/index.tsx";
-
-/**
- * `RNHostView` accepts modifiers at runtime (every expo/ui native view does),
- * but its TypeScript props do not declare them.
- */
-const HostedChat = RNHostView as unknown as (props: {
-  children: ReactElement;
-  modifiers?: ViewModifier[];
-}) => ReactElement;
 
 export default function App() {
   return (
@@ -118,11 +105,12 @@ function Shell() {
         >
           {/* Root page. The chat stays React Native; everything the stack draws
               around it (bars, the interactive pop, the tint) is native. */}
-          {/* `ignoreSafeArea(.keyboard)`: SwiftUI's own keyboard avoidance shifts
-              the hosted view up, and the chat already lifts its composer by the
-              measured overlap — together they threw the input to the top of the
-              screen. The chat keeps sole control of the keyboard. */}
-          <HostedChat modifiers={[ignoreSafeArea({ regions: "keyboard" })]}>
+          {/* SwiftUI owns the keyboard: it shrinks this hosted view when the
+              keyboard appears, so the chat lays out against the new bottom edge
+              and its composer ends up on the keyboard. The chat does no keyboard
+              math of its own (v23 — the two together threw the input to the
+              top). */}
+          <RNHostView>
             <ChatScreen
               agentId={state.agentId}
               agents={state.agents}
@@ -140,7 +128,7 @@ function Shell() {
               onOpenSettings={openSettings}
               onOpenModelSettings={openSettings}
             />
-          </HostedChat>
+          </RNHostView>
 
           <SettingsPages
             providers={state.providers}

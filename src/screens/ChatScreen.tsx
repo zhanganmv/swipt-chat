@@ -3,14 +3,12 @@ import {
   ActivityIndicator,
   Animated,
   FlatList,
-  Keyboard,
   Platform,
   Pressable,
   StyleSheet,
   Text,
   TextInput,
   View,
-  type KeyboardEvent,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from "react-native";
@@ -64,55 +62,7 @@ export const ChatScreen = memo(function ChatScreen({
 }) {
   const { colors, type } = useTheme();
   const list = useRef<FlatList<Message>>(null);
-  const root = useRef<Measurable | null>(null);
-  const rootBottom = useRef(0);
-  const [keyboard, setKeyboard] = useState(0);
   const [atBottom, setAtBottom] = useState(true);
-
-  // Where this view's bottom sits on screen. The keyboard frame arrives in
-  // screen coordinates, so the inset is "screen bottom - keyboard top": the
-  // input row then ends exactly on the keyboard, whatever the safe area or the
-  // hosting SwiftUI view did around us.
-  //
-  // Measured on the root, not on the composer: the root's frame is fixed, while
-  // the composer moves by the very inset being computed. Measuring it once is
-  // enough — `paddingBottom` changes the layout inside this view, not its frame.
-  const setRoot = useCallback((node: unknown) => {
-    root.current = (node as Measurable | null) ?? null;
-  }, []);
-
-  const measureRoot = useCallback(() => {
-    root.current?.measureInWindow((_x, y, _width, height) => {
-      if (height > 0) {
-        rootBottom.current = y + height;
-      }
-    });
-  }, []);
-
-  useEffect(() => {
-    const onFrame = (event: KeyboardEvent) => {
-      const anchor = rootBottom.current;
-      const next =
-        anchor > 0
-          ? anchor - event.endCoordinates.screenY
-          : event.endCoordinates.height;
-      setKeyboard(Math.max(0, Math.round(next)));
-    };
-    const onHide = () => {
-      setKeyboard(0);
-      setTimeout(measureRoot, 80);
-    };
-    const frame = Keyboard.addListener("keyboardWillChangeFrame", onFrame);
-    const hidden = Keyboard.addListener(
-      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide",
-      onHide,
-    );
-    return () => {
-      frame.remove();
-      hidden.remove();
-    };
-  }, [measureRoot]);
-
   const scrollToEnd = useCallback((animated = true) => {
     requestAnimationFrame(() =>
       list.current?.scrollToEnd({ animated }),
@@ -133,14 +83,7 @@ export const ChatScreen = memo(function ChatScreen({
   }, []);
 
   return (
-    <View
-      ref={setRoot}
-      onLayout={measureRoot}
-      style={[
-        styles.root,
-        { backgroundColor: colors.background, paddingBottom: keyboard },
-      ]}
-    >
+    <View style={[styles.root, { backgroundColor: colors.background }]}>
       <ChatHeader
         agentId={agentId}
         agents={agents}
@@ -213,11 +156,6 @@ export const ChatScreen = memo(function ChatScreen({
     </View>
   );
 });
-
-/** The one method we need from a measured view; RN 0.88's public types drop it. */
-type Measurable = {
-  measureInWindow: (cb: (x: number, y: number, width: number, height: number) => void) => void;
-};
 
 function MessageRow({ message }: { message: Message }) {
   const { colors, type } = useTheme();
