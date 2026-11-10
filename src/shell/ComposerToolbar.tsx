@@ -206,7 +206,14 @@ export const ComposerToolbar = memo(function ComposerToolbar({
  * "Jump to latest" bubble that floats over the transcript. Same native recipe so
  * the chevron is a real symbol rather than a pair of drawn bars.
  */
-export function JumpToBottom({ onPress }: { onPress: () => void }) {
+export function JumpToBottom({
+  bottom,
+  onPress,
+}: {
+  /** Distance from the bottom edge; the chat passes the composer's height. */
+  bottom: number;
+  onPress: () => void;
+}) {
   const { colors } = useTheme();
 
   return (
@@ -214,7 +221,7 @@ export function JumpToBottom({ onPress }: { onPress: () => void }) {
       style={{
         position: "absolute",
         alignSelf: "center",
-        bottom: 8,
+        bottom,
         width: 36,
         height: 36,
       }}

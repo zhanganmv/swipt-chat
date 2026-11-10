@@ -5,7 +5,7 @@
   "swiplet": {
     "id": "swipt-chat",
     "name": "Swipt Chat",
-    "versionCode": 23,
+    "versionCode": 24,
     "icon": {
       "color": "blue",
       "symbol": "sparkles"

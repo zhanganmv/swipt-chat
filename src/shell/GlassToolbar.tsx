@@ -1,9 +1,12 @@
 import type { ReactNode } from "react";
 import { View } from "react-native";
 import { HStack, Host, Spacer, Text } from "@expo/ui/swift-ui";
-import { controlSize, font, padding } from "@expo/ui/swift-ui/modifiers";
-
-import { useTheme } from "../theme/index.tsx";
+import {
+  background,
+  controlSize,
+  font,
+  padding,
+} from "@expo/ui/swift-ui/modifiers";
 
 /**
  * The glass strip every screen's top bar is made of.
@@ -24,15 +27,20 @@ export function GlassToolbar({
   title?: string;
   trailing: ReactNode[];
 }) {
-  const { colors } = useTheme();
-
   return (
-    <View style={{ height: 48, backgroundColor: colors.background }}>
+    <View style={{ height: 48 }}>
       <Host style={{ flex: 1 }} matchContents={{ vertical: true }}>
         <HStack
           spacing={10}
           alignment="center"
-          modifiers={[padding({ horizontal: 12, vertical: 4 }), controlSize("large")]}
+          modifiers={[
+            padding({ horizontal: 12, vertical: 4 }),
+            controlSize("large"),
+            // The bar floats over the transcript now, so it needs the system's
+            // own blur rather than an opaque fill: coloured content scrolling
+            // underneath stays visible as a soft tint.
+            background({ type: "material", material: "regular" }),
+          ]}
         >
           {leading}
           {title === undefined ? null : (

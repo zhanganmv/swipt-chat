@@ -1,16 +1,30 @@
-import { useCallback, useMemo, useState } from "react";
-import { StyleSheet, View } from "react-native";
+import { useCallback, useMemo, useState, type ReactElement } from "react";
+import { Keyboard, StyleSheet, View } from "react-native";
 import { Host, NavigationStack, RNHostView } from "@expo/ui/swift-ui";
-import { background } from "@expo/ui/swift-ui/modifiers";
+import { background, ignoreSafeArea } from "@expo/ui/swift-ui/modifiers";
 
 import type { Provider } from "./domain/types.ts";
 import { ChatScreen } from "./screens/ChatScreen.tsx";
 import { SettingsPages } from "./screens/SettingsScreen.tsx";
+import { AgentPickerSheet } from "./shell/AgentPickerSheet.tsx";
 import { AgentSheet } from "./shell/AgentSheet.tsx";
 import { ProviderSheet } from "./shell/ProviderSheet.tsx";
 import { SessionListSheet, type SessionRow } from "./shell/SessionListSheet.tsx";
 import { useChat } from "./state/useChat.ts";
 import { ThemeProvider, useTheme } from "./theme/index.tsx";
+
+/**
+ * `RNHostView` does not declare `modifiers`, but it forwards them to the native
+ * view like any other host component, and the chat needs `ignoreSafeArea`: the
+ * transcript must run edge to edge so React Native paints the status-bar and
+ * home-indicator strips in the chat's own colour. Only the *container* safe area
+ * is ignored — the keyboard safe area stays on, which is what keeps the composer
+ * sitting on top of the keyboard (v23).
+ */
+const HostedChat = RNHostView as unknown as (props: {
+  children: ReactElement;
+  modifiers?: unknown[];
+}) => ReactElement;
 
 export default function App() {
   return (
@@ -46,10 +60,33 @@ function Shell() {
     null,
   );
   const [agentForm, setAgentForm] = useState(false);
+  const [agentPicker, setAgentPicker] = useState(false);
 
-  const openSessions = useCallback(() => actions.setSheetOpen(true), [actions]);
+  const openSessions = useCallback(() => {
+    Keyboard.dismiss();
+    actions.setSheetOpen(true);
+  }, [actions]);
   const closeSessions = useCallback(() => actions.setSheetOpen(false), [actions]);
-  const openSettings = useCallback(() => setPath(["settings"]), []);
+  // Navigating away while the composer is focused used to leave the keyboard up
+  // over a chat whose input had already slid back down (v24 first report). The
+  // keyboard belongs to a field on the page we are leaving, so drop it here
+  // rather than letting the next page inherit it.
+  const openSettings = useCallback(() => {
+    Keyboard.dismiss();
+    setPath(["settings"]);
+  }, []);
+  const openAgents = useCallback(() => {
+    Keyboard.dismiss();
+    setAgentPicker(true);
+  }, []);
+  const closeAgents = useCallback(() => setAgentPicker(false), []);
+  const pickAgent = useCallback(
+    (id: string) => {
+      actions.selectAgent(id);
+      setAgentPicker(false);
+    },
+    [actions],
+  );
   const newChat = useCallback(() => {
     actions.newChat();
     setPath([]);
@@ -110,7 +147,7 @@ function Shell() {
               and its composer ends up on the keyboard. The chat does no keyboard
               math of its own (v23 — the two together threw the input to the
               top). */}
-          <RNHostView>
+          <HostedChat modifiers={[ignoreSafeArea({ regions: "container" })]}>
             <ChatScreen
               agentId={state.agentId}
               agents={state.agents}
@@ -121,14 +158,13 @@ function Shell() {
               streaming={streaming}
               onSend={actions.send}
               onStop={actions.stop}
-              onSelectAgent={actions.selectAgent}
-              onNewAgent={addAgent}
+              onOpenAgents={openAgents}
               onNewChat={newChat}
               onOpenSessions={openSessions}
               onOpenSettings={openSettings}
               onOpenModelSettings={openSettings}
             />
-          </RNHostView>
+          </HostedChat>
 
           <SettingsPages
             providers={state.providers}
@@ -172,6 +208,16 @@ function Shell() {
 
       {agentForm ? (
         <AgentSheet visible onClose={closeAgentForm} onSave={saveAgent} />
+      ) : null}
+
+      {agentPicker ? (
+        <AgentPickerSheet
+          visible
+          agents={state.agents}
+          currentId={state.agentId}
+          onClose={closeAgents}
+          onSelect={pickAgent}
+        />
       ) : null}
     </View>
   );

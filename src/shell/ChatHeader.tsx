@@ -5,7 +5,7 @@ import { exit } from "@swipt/api/swiplet";
 import {
   GlassButton,
   GlassButtonGroup,
-  GlassChipMenu,
+  GlassChipButton,
   GlassMenu,
 } from "./GlassControls.tsx";
 import { GlassToolbar } from "./GlassToolbar.tsx";
@@ -18,7 +18,8 @@ import { GlassToolbar } from "./GlassToolbar.tsx";
  * is what made 更多 (`ellipsis`, wide) look bigger than its neighbours before.
  *
  * 更多 is a real SwiftUI `Menu`: iOS presents it as its own liquid-glass
- * popover with the system's animation, not the React Native dropdown.
+ * popover with the system's animation, not the React Native dropdown. The agent
+ * capsule opens the agent sheet (v24) — same bottom-sheet language as 会话列表.
  *
  * `memo` is load-bearing. The chat screen re-renders on every streamed token;
  * before this, the header's props were recreated each time, so the `Host`
@@ -29,16 +30,14 @@ import { GlassToolbar } from "./GlassToolbar.tsx";
 export const ChatHeader = memo(function ChatHeader({
   agentId,
   agents,
-  onSelectAgent,
-  onNewAgent,
+  onOpenAgents,
   onNewChat,
   onOpenSessions,
   onOpenSettings,
 }: {
   agentId: string;
   agents: { id: string; title: string }[];
-  onSelectAgent: (id: string) => void;
-  onNewAgent: () => void;
+  onOpenAgents: () => void;
   onNewChat: () => void;
   onOpenSessions: () => void;
   onOpenSettings: () => void;
@@ -54,17 +53,12 @@ export const ChatHeader = memo(function ChatHeader({
           label="返回 Swipt"
           onPress={() => exit()}
         />,
-        <GlassChipMenu key="agent" label={agentName} systemImage="person.crop.circle.fill">
-          {agents.map((agent) => (
-            <Button
-              key={agent.id}
-              label={agent.title}
-              systemImage={agent.id === agentId ? "checkmark" : undefined}
-              onPress={() => onSelectAgent(agent.id)}
-            />
-          ))}
-          <Button label="新建智能体" systemImage="plus" onPress={onNewAgent} />
-        </GlassChipMenu>,
+        <GlassChipButton
+          key="agent"
+          label={agentName}
+          systemImage="person.crop.circle.fill"
+          onPress={onOpenAgents}
+        />,
       ]}
       trailing={[
         // One capsule for both icons, as in the Cherry reference: the pair reads

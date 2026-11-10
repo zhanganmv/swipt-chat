@@ -155,59 +155,59 @@ export function GlassButtonGroup({ children }: { children: ReactNode }) {
 /**
  * A labelled glass capsule (the agent selector).
  *
- * The label is a custom view, which is the only way to get both an icon and a
- * name inside the native menu's glass: `systemImage` + string `label` draws the
- * text flush against the capsule edge and clips a long name mid-glyph. Here the
- * capsule hugs its content (`padding` 12), the name truncates at 150pt, and the
- * whole capsule — not just the text — is the hit area.
+ * It used to be a `Menu`; v24 turns it into a plain button that opens the agent
+ * sheet, because a menu's popover anchored to a capsule the user calls "下拉" did
+ * not match the rest of the app — every other list is a bottom sheet now.
+ *
+ * The capsule hugs its content (`padding` 12), the name truncates at
+ * `AGENT_CHIP_MAX_WIDTH`, and the whole capsule — not just the text — is the hit
+ * area: the frame, content shape and glass all sit on the button's label.
  */
-export function GlassChipMenu({
+export function GlassChipButton({
   label,
   systemImage,
-  children,
+  onPress,
   maxWidth = AGENT_CHIP_MAX_WIDTH,
 }: {
   label: string;
   systemImage: SFSymbol;
-  children: ReactNode;
+  onPress: () => void;
   maxWidth?: number;
 }) {
   const { colors } = useTheme();
   return (
-    <Menu
-      label={
-        <HStack
-          spacing={6}
-          alignment="center"
-          modifiers={[
-            padding({ horizontal: 12 }),
-            frame({ height: GLASS_CONTROL_SIZE }),
-            contentShape(shapes.capsule()),
-            glassCapsule,
-          ]}
-        >
-          <Image
-            systemName={systemImage}
-            size={13}
-            color={colors["muted-foreground"]}
-            modifiers={[frame({ width: 20, height: 20 })]}
-          />
-          <Text
-            modifiers={[
-              font({ size: 15 }),
-              lineLimit(1),
-              truncationMode("tail"),
-              frame({ maxWidth }),
-            ]}
-          >
-            {label}
-          </Text>
-        </HStack>
-      }
+    <Button
+      onPress={onPress}
       modifiers={[buttonStyle("plain"), accessibilityLabel(label)]}
     >
-      {children}
-    </Menu>
+      <HStack
+        spacing={6}
+        alignment="center"
+        modifiers={[
+          padding({ horizontal: 12 }),
+          frame({ height: GLASS_CONTROL_SIZE }),
+          contentShape(shapes.capsule()),
+          glassCapsule,
+        ]}
+      >
+        <Image
+          systemName={systemImage}
+          size={13}
+          color={colors["muted-foreground"]}
+          modifiers={[frame({ width: 20, height: 20 })]}
+        />
+        <Text
+          modifiers={[
+            font({ size: 15 }),
+            lineLimit(1),
+            truncationMode("tail"),
+            frame({ maxWidth }),
+          ]}
+        >
+          {label}
+        </Text>
+      </HStack>
+    </Button>
   );
 }
 
