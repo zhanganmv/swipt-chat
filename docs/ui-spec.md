@@ -102,6 +102,8 @@ v13 曾把抽屉的出现方式放在 RN 侧自己实现（`Animated` 滑入 260
 - 48pt 高、`GlassToolbar` 承载，`HStack(spacing 10, alignment center)`，背景是原生 material 模糊（浮在消息列表之上，见「当前基线」）。
 - 从左到右：**返回 Swipt**（玻璃圆钮 `chevron.left` 17pt）→ **智能体胶囊**（圆形头像 + 名称，点开底部抽屉选择）→（弹性空间）→ 右侧**一组胶囊**里并排 **新增会话** + **更多**（更多是原生 `Menu`：会话列表、设置）。
 - 顶栏只放这四项；模型、智能体、工具、MCP、技能全部在设置页，不在顶栏堆图标。
+**以下是顶栏的变更记录（v8–v18），实现以上面「v27 现状」为准。**
+
 - **实现（v10）**：顶栏抽成共享组件 `src/shell/GlassToolbar.tsx`（高 48、左右 12、间距 10、`controlSize("large")`），聊天页和设置页都只用它，两边不会漂。
 - **实现（v13）**：四个控件改由 `src/shell/GlassControls.tsx` 统一出：`GlassButton`（图标钮）/ `GlassMenu`（图标菜单）/ `GlassChipMenu`（带文字的胶囊）。**尺寸写死 40×40**，玻璃用 `glassEffect` 自己画，不再依赖 `buttonStyle("glass")` 按图标宽度撑出的胶囊——`ellipsis` 比 `chevron.left` 宽，这正是「更多」看起来比旁边大的原因。菜单一并改回原生 SwiftUI `Menu`，由系统弹出液态玻璃浮层；RN 的 `DropdownMenu` 只留给 `ChatHeaderRN.tsx` 这个回退版本。
 - **实现（v14，修点击手感）**：三处一起改，解决「点一下没反应、要长按」：
