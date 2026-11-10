@@ -7,7 +7,6 @@ import {
   List,
   NavigationLink,
   Picker,
-  ProgressView,
   Section,
   SecureField,
   Spacer,
@@ -34,7 +33,7 @@ import {
   textInputAutocapitalization,
 } from "@expo/ui/swift-ui/modifiers";
 
-import { describeFailure, normalizeFailure } from "../api/errors.ts";
+import { describeFailure, normalizeFailure, technicalOf } from "../api/errors.ts";
 import {
   PROTOCOL_LABEL,
   TEMPLATES,
@@ -130,7 +129,7 @@ export function InstancePage({
       setCandidates(ids);
       setCandidateOpen(true);
     } catch (error) {
-      Alert.alert("获取模型失败", fetchErrorText(error));
+      Alert.alert("获取模型失败", `${fetchErrorText(error)}\n\n${technicalOf(error)}`);
     } finally {
       setFetching(false);
     }
@@ -387,12 +386,9 @@ function fetchRow(
   block: () => void,
 ) {
   if (fetching) {
-    return (
-      <HStack spacing={8}>
-        <ProgressView />
-        <Muted text="正在拉取模型目录…" />
-      </HStack>
-    );
+    // Deliberately a plain Text: the loading row must not depend on a native
+    // component the installed @expo/ui may not have.
+    return <Muted text="正在拉取模型目录…" />;
   }
   return (
     <Button

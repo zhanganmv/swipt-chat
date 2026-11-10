@@ -39,7 +39,7 @@
 - **渲染节奏**：`FLUSH_MS = 50` 把 token 增量合并成一次 `dispatch`，60 token/s 的实际渲染是 20 次/s，而不是 60 次/s（旧的实现每个 token 复制整份会话数组）。
 - **引用稳定性**：`useChat` 里 `stateRef` 持有最新 state，`send` 的依赖数组为空，所以 `actions.send` 的引用在组件生命周期内不变；`actions` 由 `useMemo` 固定。流式期间 `ChatScreen`/`ComposerToolbar`/`ChatHeader` 的 `Host` 不重建。
 - **中止**：`stop()` 只 `controller.abort()`，收尾由 `send` 的 catch 分支 `dispatch stop`，或正常返回后的 `dispatch end` 完成；按 `messageId` 定位，所以切走会话/新建会话后旧流也能正确收尾。
-- **请求信号**：宿主的 `Client.fetch` 只接受它自己的 `AbortSignal`（WebIDL 校验：`argument 2's signal is not an AbortSignal`），swiplet 无法构造。所以 `request.ts` **不向 fetch 传 `signal`**：超时与停止由本地 `Promise.race(截止时间, 调用方 signal)` 兑现；停止时 `stream.ts` 用 `reader.cancel()` 释放原生流。请求本身无法撤回，但结果被丢弃——界面行为与真正的取消一致。
+- **请求信号**：宿主的 `Client.fetch` 只接受它自己的 `AbortSignal`（WebIDL 校验：`argument 2's signal is not an AbortSignal`），swiplet 无法构造。所以 `request.ts` **不向 fetch 传 `signal`**：超时与停止由本地 `Promise.race(截止时间, 调用方 signal)` 兑现；停止时 `stream.ts` 用 `reader.cancel()` 释放原生流。请求本身无法撤回，但结果被丢弃——界面行为与真正的取消一致。失败按阶段包装（创建客户端 / 发送请求 / 读取响应），因为宿主桥自己的异常是一条裸 `TypeError`，没有阶段就无法定位是哪一环缺失。
 
 ## 4. 消息状态机
 

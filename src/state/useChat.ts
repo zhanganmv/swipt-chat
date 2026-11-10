@@ -389,6 +389,9 @@ export function useChat(): UseChat {
 
   const fetchModels = useCallback(async (instance: Instance): Promise<string[]> => {
     try {
+      void logLine(
+        `models: start ${instance.protocol} ${instance.baseURL} key=${instance.apiKey.length} chars`,
+      );
       const ids = await requestModels(instance, undefined);
       void logLine(`models: ${instance.baseURL} ${ids.length}`);
       return ids;

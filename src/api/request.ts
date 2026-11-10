@@ -92,18 +92,24 @@ async function call(
       detail: "当前 Swipt 版本不提供网络接口，请更新 Swipt 后重试",
     });
   }
-  const client = new Client();
-  if (typeof client.fetch !== "function") {
-    throw new ChatFailure({
-      kind: "network",
-      detail: "当前 Swipt 版本不提供网络接口，请更新 Swipt 后重试",
-    });
-  }
+  // Every step is named: the host's own failures arrive as bare TypeErrors, and
+  // without the stage the message ("undefined is not a function") says nothing
+  // about which call in the bridge is missing.
+  let stage = "创建网络客户端";
   try {
+    const client = new Client();
+    if (typeof client.fetch !== "function") {
+      throw new ChatFailure({
+        kind: "network",
+        detail: "当前 Swipt 版本不提供网络接口，请更新 Swipt 后重试",
+      });
+    }
+    stage = "发送请求";
     const response = await Promise.race([
       client.fetch(url, init),
       deadline.expires,
     ]);
+    stage = "读取响应";
     if (!response.ok) {
       const detail = await response.text().catch(() => "");
       throw new ChatFailure({
@@ -113,6 +119,12 @@ async function call(
       });
     }
     return response;
+  } catch (thrown) {
+    if (thrown instanceof ChatFailure) {
+      throw thrown;
+    }
+    const message = thrown instanceof Error ? thrown.message : String(thrown);
+    throw new ChatFailure({ kind: "network", detail: `${stage}失败：${message}` });
   } finally {
     deadline.release();
   }
