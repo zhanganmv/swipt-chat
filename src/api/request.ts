@@ -1,24 +1,25 @@
 import { Client } from "@swipt/api/http";
 
-import type { Message, Provider } from "../domain/types.ts";
+import type { Endpoint, Instance } from "../domain/service.ts";
+import type { Message } from "../domain/types.ts";
 import { ChatFailure } from "./errors.ts";
 import {
   bodyOf,
-  endpointOf,
+  chatEndpointOf,
   headersOf,
   modelIdsOf,
   modelsEndpointOf,
-} from "./openai.ts";
+} from "./protocol.ts";
 
 /**
  * The one place a request is actually sent.
  *
  * Kept apart from the wire format so the format stays testable: everything here
- * needs the Swipt host, nothing in `openai.ts` does.
+ * needs the Swipt host, nothing in `protocol.ts` does.
  */
 const REQUEST_TIMEOUT_MS = 30000;
 /** Listing models is a health check as much as a query: fail fast. */
-const MODELS_TIMEOUT_MS = 15000;
+const MODELS_TIMEOUT_MS = 45000;
 
 interface Guard {
   signal: AbortSignal;
@@ -54,14 +55,33 @@ function guardOf(signal: AbortSignal | undefined, timeout: number): Guard {
 
 type Response = Awaited<ReturnType<Client["fetch"]>>;
 
+async function failureOf(
+  response: Response,
+  guard: Guard,
+  timeout: number,
+): Promise<never> {
+  if (guard.timedOut()) {
+    throw new ChatFailure({
+      kind: "timeout",
+      detail: `${timeout / 1000}s 内没有响应`,
+    });
+  }
+  const detail = await response.text().catch(() => "");
+  throw new ChatFailure({
+    kind: "http",
+    status: response.status,
+    detail: detail.trim(),
+  });
+}
+
 /**
- * POST a chat completion and hand back the raw response.
+ * POST one turn and hand back the raw response.
  *
  * Failures are classified here so callers never inspect a status code: a
  * timeout and a 4xx/5xx both arrive as `ChatFailure`.
  */
 export async function requestChat(
-  provider: Provider,
+  endpoint: Endpoint,
   messages: readonly Message[],
   stream: boolean,
   signal: AbortSignal | undefined,
@@ -69,19 +89,14 @@ export async function requestChat(
   const client = new Client();
   const guard = guardOf(signal, REQUEST_TIMEOUT_MS);
   try {
-    const response = await client.fetch(endpointOf(provider), {
+    const response = await client.fetch(chatEndpointOf(endpoint.instance), {
       method: "POST",
-      headers: headersOf(provider),
-      body: bodyOf(messages, provider, stream),
+      headers: headersOf(endpoint.instance),
+      body: bodyOf(endpoint.instance, endpoint.model, messages, stream),
       signal: guard.signal,
     });
     if (!response.ok) {
-      const detail = await response.text().catch(() => "");
-      throw new ChatFailure({
-        kind: "http",
-        status: response.status,
-        detail: detail.trim(),
-      });
+      await failureOf(response, guard, REQUEST_TIMEOUT_MS);
     }
     return response;
   } catch (thrown) {
@@ -98,29 +113,24 @@ export async function requestChat(
 }
 
 /**
- * List the models a service exposes, which doubles as the connectivity probe:
- * a wrong address, key or a service that cannot speak OpenAI all fail here,
- * before the user has typed anything into the chat.
+ * List the models an instance exposes, which doubles as the connectivity probe:
+ * a wrong address, key or protocol fails here, before the user has typed
+ * anything into the chat.
  */
 export async function requestModels(
-  provider: Provider,
+  instance: Instance,
   signal: AbortSignal | undefined,
 ): Promise<string[]> {
   const client = new Client();
   const guard = guardOf(signal, MODELS_TIMEOUT_MS);
   try {
-    const response = await client.fetch(modelsEndpointOf(provider), {
+    const response = await client.fetch(modelsEndpointOf(instance), {
       method: "GET",
-      headers: headersOf(provider),
+      headers: headersOf(instance),
       signal: guard.signal,
     });
     if (!response.ok) {
-      const detail = await response.text().catch(() => "");
-      throw new ChatFailure({
-        kind: "http",
-        status: response.status,
-        detail: detail.trim(),
-      });
+      await failureOf(response, guard, MODELS_TIMEOUT_MS);
     }
     return modelIdsOf(await response.text());
   } catch (thrown) {

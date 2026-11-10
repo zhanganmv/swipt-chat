@@ -20,7 +20,7 @@
 **抽屉（四个）**
 - 会话列表、智能体选择、模型服务表单、新建智能体，统一走 `SheetShell`：1×1 `Host` + `BottomSheet` + `presentationDetents` + `presentationDragIndicator("visible")` + `presentationCornerRadius(28)`。
 - 关闭动画由 `useSheetLifecycle` 保证：组件在第一次 `true` 时挂载，只在原生 `onIsPresentedChange(false)` 之后卸载。父组件必须**常挂载**、只传 `visible`。
-- 「正在编辑的记录」与「抽屉是否打开」是两个状态（`providerForm` / `providerOpen`），关闭时不立刻清记录，否则表单会在滑出的 0.3 秒里闪成空白。
+- 「正在编辑的记录」与「抽屉是否打开」是两个状态（v30 是 `createTemplate` / `createOpen`），关闭时不立刻清记录，否则表单会在滑出的 0.3 秒里闪成空白。
 
 **控件**
 - `src/shell/GlassControls.tsx`：40×40 玻璃圆钮、胶囊按钮、按钮组，**尺寸、`contentShape`、玻璃全部画在 label 上**；外层 `Button`/`Menu` 只留 `buttonStyle("plain")`、`disabled`、`accessibilityLabel`。图标 17pt。
@@ -150,10 +150,13 @@ v13 曾把抽屉的出现方式放在 RN 侧自己实现（`Animated` 滑入 260
 | 技能 `/skills` | 顶栏「技能」+「导入」；列表行：技能名 16/500 + 描述 sm/muted 两行截断 + 来源标签（URL/内置/生成）；详情页含 SKILL.md 全文与「启用」开关 |
 | 插件（MCP）`/plugins` | 顶栏「插件」；两段：已连接 / 可添加；行：服务名 + 状态点（绿/灰/红）+ 工具数；详情页：工具列表（每行名称 + 开关）、连接信息、删除 |
 | 设置根（v27 现状） | 一个 `NavigationDestination value="settings"` 的系统页面：`Toolbar` 里只放 `List`（`insetGrouped`）+ `navigationTitle("设置")` + inline 标题；左上角返回箭头**由系统栈提供**（v20 起不再放自绘返回）。分组只有 **对话**（模型服务、智能体，右侧显示数量）与 **能力**（工具、MCP 服务、技能）；「通用」「关于」已按用户要求删除（v17）。每行是 `Label`（SF Symbol）+ 右侧值，chevron 由系统给 |
-| 设置二级页（v27 现状） | 每个能力都是 `NavigationDestination` 推入的系统页面，自带导航栏、返回箭头、滚动边缘材质。模型服务页是**列表**：当前项打勾、行内 `ContextMenu`（设为当前 / 删除），右上角 `+`；智能体页同构（轻点切当前、长按删除、右上角 +）。工具 / MCP / 技能三页先给占位与批次说明，「添加」弹 `Alert` |
-| 模型服务表单（v17 起抽屉，v29 加模型目录） | 底部抽屉 `ProviderSheet`（`SheetShell` + `Form`）：第一段名称、接口地址（url 键盘）、API Key；第二段模型——模型名 `TextField`、`Menu`「选择模型」（预置目录 + 已拉取的 id，按 baseURL 命中预置）、「测试连接并拉取模型」按钮（同时是连通性自检，结果一行提示：`连接正常 · N 个模型` 或分类后的错误）；第三段「流式输出」`Toggle`。`ToolbarItem topBarLeading` 取消、`topBarTrailing` 保存（地址或模型为空时置灰）。关闭时先播系统 dismissing 动画，再卸载（`useSheetLifecycle`），且关闭不清空记录，避免滑出时字段闪白 |
+| 设置二级页（v30 现状） | 每个能力都是 `NavigationDestination` 推入的系统页面，自带导航栏、返回箭头。智能体页仍是本次列表（轻点切当前、长按删除、右上角 +）；工具 / MCP / 技能三页先给占位与批次说明 |
+| 模型服务（v30） | 首页按模板分组（OpenAI / Anthropic / DeepSeek / 自定义，空组隐藏），行=名称 + 代理域名小字 + 「N 个模型」；右上角 `+` 是模板菜单（三个内置 + 自定义…），左滑删除。点行推入实例详情，再点模型推入模型详情 |
+| 实例详情（v30） | 四段：连接（名称、模板只读、协议条件可改、Base URL、API Key、恢复默认地址、流式开关、ID）；模型（空态给「获取模型」「手动添加模型」，有模型时列表可左滑删）；高级（自定义请求头键值对，Anthropic 的 `anthropic-version` 只读展示）；危险操作（删除此连接）。没有全局保存按钮，编辑即时落库 |
+| 创建实例（v30） | 底部抽屉：内置模板名称预填厂商、API Key 必填、协议锁定；自定义模板多一个协议 Picker，Key 可空。创建即落库并直接推入实例详情 |
+| 候选模型面板（v30） | 底部抽屉：搜索、全选、每个候选一个 Toggle，已添加的不再出现；「添加所选」才写入，拉取结果本身不改配置 |
+| 模型详情（v30） | 基础（ID 只读、显示名、备注）/ 容量（最大输出 token、上下文窗口）/ 思考（OpenAI 推理强度三档，Anthropic 预算 ≥1024 且小于最大输出 token）/ 采样（Temperature、Top P，Anthropic 上限 1）/ 输入模态（图像开关） |
 | 会话列表 | 不占整页：底部抽屉，见 §3 |
-| Provider 列表（v27 现状） | 见「设置二级页」一行：列表 + 右上角「添加」+ 行内菜单；模型/密钥/流式都在抽屉表单里一次填完，不再有 `providerEdit` 推入页 |
 | 会话搜索 | 顶栏搜索框（圆角 12、`card` 底）+ 结果按会话分组，关键词高亮 |
 
 `Section` / `Section.Item` 的行高、内边距、分隔线缩进待逐屏取样后补进本文（见 §8）。
@@ -291,4 +294,15 @@ v24 把输入区做成浮层，再用它测出来的高度去补列表的 `paddi
 
 改法：新增 `src/shell/useSheetLifecycle.ts` 的 `useSheetLifecycle(visible)` → `{mounted, finish}`。组件在第一次 `true` 时挂载，只在原生 `onIsPresentedChange(false)`（关闭动画结束）后由 `finish()` 卸载。四个抽屉（会话列表、智能体选择、模型服务、智能体新建）全部改用它，并且在 `App` 里改成常挂载、只传 `visible`。
 
-同时把「正在编辑的记录」与「抽屉是否打开」拆成两个状态（`providerForm` / `providerOpen`）。原来关闭时立刻把记录清成 `null`，抽屉还在滑出的那 0.3 秒里表单已被重新 key 成空表单，字段会先闪成空白——现在关闭只关可见性，记录留到下一次打开时替换。
+同时把「正在编辑的记录」与「抽屉是否打开」拆成两个状态（v30 是 `createTemplate` / `createOpen`）。原来关闭时立刻把记录清成 `null`，抽屉还在滑出的那 0.3 秒里表单已被重新 key 成空表单，字段会先闪成空白——现在关闭只关可见性，记录留到下一次打开时替换。
+
+## 21. v30：模型服务重构为 模板 → 实例 → 模型
+
+按用户给的交互文档整体重做，旧的一层「Provider + 模型 id 字符串」结构全部替换：
+
+- **模板不是实体**：`TEMPLATES`（OpenAI / Anthropic / DeepSeek / 自定义）只决定创建时的默认名称、默认 Base URL、可用协议与首页分组。实例（`Instance`）才是管理对象，带不可变 `id` 与 `templateId`。
+- **三层页面**：模型服务首页按 `templateId` 分组（空组隐藏）→ 实例详情（连接 / 模型 / 高级 / 危险操作）→ 模型详情（基础 / 容量 / 思考 / 采样 / 输入模态）。三页都是设置栈里的 `NavigationDestination`，滑动返回仍由栈深决定。
+- **协议影响行为**：`openai-chat` / `openai-responses` / `anthropic-messages` 决定端点拼接、请求头注入、请求体字段、SSE 解析、模型参数显隐与校验；Anthropic 的 `budget_tokens ≥ 1024 且 < max_tokens`、temperature 上限 1 都只在对应协议下出现。
+- **校验与不可变项**：名称 trim 非空、Base URL 必须能解析；模型 ID 创建后只读；实例 ID 不在 UI 暴露；协议切换不删模型只提示。
+- **创建即落库、模型添加即落库**：模型参数每次编辑都进 reducer，仍由 300ms 防抖 + diff 写 SQLite；`modelUpdate` 与 `instanceUpdate` 对相同值返回原 state，避免无变化的编辑触发落库与重渲染。
+- **删除**：实例删除级联 `model_config` / `instance_secret` / `instance_header`；删除前都弹确认，并写明会连带删除多少模型。

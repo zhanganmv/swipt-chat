@@ -1,9 +1,11 @@
 import { readSSELine } from "../sse.ts";
 import { UTF8Decoder } from "../utf8.ts";
+import type { Protocol } from "../domain/service.ts";
 import { ChatFailure } from "./errors.ts";
 
 /**
- * SSE decoding for `/chat/completions`: raw bytes in, `delta` strings out.
+ * SSE decoding: raw bytes in, `delta` strings out. The protocol decides which
+ * event carries the text (see `sse.ts`).
  *
  * Split from the request module so the chunking/UTF-8 rules can be tested
  * without a network, which is what `scripts/check.ts` does.
@@ -11,6 +13,7 @@ import { ChatFailure } from "./errors.ts";
 export async function readDeltas(
   body: ReadableStream<Uint8Array>,
   onDelta: (delta: string) => void,
+  protocol: Protocol,
 ): Promise<number> {
   const reader = body.getReader();
   const decoder = new UTF8Decoder();
@@ -32,7 +35,7 @@ export async function readDeltas(
         const line = buffer.slice(0, newline).trim();
         buffer = buffer.slice(newline + 1);
         newline = buffer.indexOf("\n");
-        const event = readSSELine(line);
+        const event = readSSELine(line, protocol);
         if (event === null) {
           continue;
         }

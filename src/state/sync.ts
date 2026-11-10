@@ -7,7 +7,9 @@
  * batches them into one transaction.
  */
 import type { ChatState } from "../domain/conversation.ts";
-import type { Message, Provider } from "../domain/types.ts";
+import type { Instance, ModelConfig } from "../domain/service.ts";
+import { sameInstance, sameModelConfig } from "../domain/service.ts";
+import type { Message } from "../domain/types.ts";
 import type { StoreOp } from "./store.ts";
 
 const sameMessage = (left: Message, right: Message): boolean =>
@@ -15,16 +17,6 @@ const sameMessage = (left: Message, right: Message): boolean =>
   left.content === right.content &&
   left.status === right.status &&
   left.error === right.error;
-
-const sameIds = (left: readonly string[], right: readonly string[]): boolean =>
-  left.length === right.length && left.every((id, index) => id === right[index]);
-
-const sameProvider = (left: Provider, right: Provider): boolean =>
-  left.name === right.name &&
-  left.baseURL === right.baseURL &&
-  left.model === right.model &&
-  left.stream === right.stream &&
-  left.apiKey === right.apiKey;
 
 /**
  * `base` must be the state that was last handed to the store, not the previous
@@ -72,16 +64,45 @@ export function diffState(
     ops.push({ kind: "session.delete", id });
   }
 
-  const oldProviders = new Map(base.providers.map((item) => [item.id, item]));
-  for (const provider of next.providers) {
-    const previous = oldProviders.get(provider.id);
-    oldProviders.delete(provider.id);
-    if (previous === undefined || !sameProvider(previous, provider)) {
-      ops.push({ kind: "provider", provider });
+  const oldInstances = new Map(base.instances.map((item) => [item.id, item]));
+  for (let position = 0; position < next.instances.length; position += 1) {
+    const instance = next.instances[position];
+    const previous = oldInstances.get(instance.id);
+    oldInstances.delete(instance.id);
+    if (previous === undefined || !sameInstance(previous, instance)) {
+      ops.push({ kind: "instance", instance, position });
     }
   }
-  for (const id of oldProviders.keys()) {
-    ops.push({ kind: "provider.delete", id });
+  for (const id of oldInstances.keys()) {
+    ops.push({ kind: "instance.delete", id });
+  }
+
+  for (const instanceId of Object.keys(next.models)) {
+    const models = next.models[instanceId];
+    const previous = base.models[instanceId] ?? [];
+    for (let position = 0; position < models.length; position += 1) {
+      const model = models[position];
+      const existing = previous.find((item) => item.id === model.id);
+      if (existing === undefined || !sameModelConfig(existing, model)) {
+        ops.push({ kind: "model", instanceId, model, position });
+      }
+    }
+    for (const model of previous) {
+      if (!models.some((item) => item.id === model.id)) {
+        ops.push({ kind: "model.delete", instanceId, modelId: model.id });
+      }
+    }
+  }
+  for (const instanceId of Object.keys(base.models)) {
+    if (next.models[instanceId] === undefined) {
+      // The instance is gone (or its models were cleared); `instance.delete`
+      // already cascades, so only an emptied list needs explicit deletes.
+      if (next.instances.some((item) => item.id === instanceId)) {
+        for (const model of base.models[instanceId]) {
+          ops.push({ kind: "model.delete", instanceId, modelId: model.id });
+        }
+      }
+    }
   }
 
   const oldAgents = new Map(base.agents.map((item) => [item.id, item]));
@@ -96,19 +117,14 @@ export function diffState(
     ops.push({ kind: "agent.delete", id });
   }
 
-  for (const providerId of Object.keys(next.models)) {
-    const models = next.models[providerId];
-    const previous = base.models[providerId];
-    if (previous === undefined || !sameIds(previous, models)) {
-      ops.push({ kind: "models", providerId, models });
-    }
-  }
-
   if (base.currentId !== next.currentId) {
     ops.push({ kind: "state", key: "current_session", value: next.currentId });
   }
-  if (base.providerId !== next.providerId) {
-    ops.push({ kind: "state", key: "active_provider", value: next.providerId });
+  if (base.instanceId !== next.instanceId) {
+    ops.push({ kind: "state", key: "active_instance", value: next.instanceId });
+  }
+  if (base.modelId !== next.modelId) {
+    ops.push({ kind: "state", key: "active_model", value: next.modelId });
   }
   if (base.agentId !== next.agentId) {
     ops.push({ kind: "state", key: "active_agent", value: next.agentId });

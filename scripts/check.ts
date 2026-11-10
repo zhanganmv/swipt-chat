@@ -2,15 +2,35 @@ import { readSSELine } from "../src/sse.ts";
 import { UTF8Decoder } from "../src/utf8.ts";
 import {
   EMPTY_MESSAGES,
+  endpointOf,
   initialState,
-  providerOf,
+  instanceOf,
   messagesOf,
   reduce,
   type ChatState,
 } from "../src/domain/conversation.ts";
 import { newId } from "../src/domain/ids.ts";
-import { normalizeProvider, titleOf } from "../src/domain/provider.ts";
-import type { Provider } from "../src/domain/types.ts";
+import { titleOf } from "../src/domain/title.ts";
+import {
+  PROTOCOL_LABEL,
+  TEMPLATES,
+  baseURLError,
+  duplicateHeader,
+  hostOf,
+  modelCountLabel,
+  newInstance,
+  newModel,
+  newThinking,
+  protocolEditable,
+  protocolFooter,
+  proxyHostOf,
+  templateOf,
+  thinkingError,
+  type Endpoint,
+  type Instance,
+  type ModelConfig,
+  type Protocol,
+} from "../src/domain/service.ts";
 import {
   ChatFailure,
   describeFailure,
@@ -18,13 +38,12 @@ import {
 } from "../src/api/errors.ts";
 import {
   bodyOf,
+  chatEndpointOf,
   completionOf,
-  endpointOf,
   headersOf,
   modelIdsOf,
   modelsEndpointOf,
-} from "../src/api/openai.ts";
-import { suggestedModels, uniqueModels } from "../src/domain/catalog.ts";
+} from "../src/api/protocol.ts";
 import {
   SCHEMA_VERSION,
   detectFts5,
@@ -276,40 +295,86 @@ check(
   reduce(selected, { type: "draft", text: selected.draft }) === selected,
   true,
 );
-// ------------------------------------------------------- provider/agent lists
-const p1 = { id: "p1", name: "一", baseURL: "https://a/v1", model: "m1", apiKey: "", stream: true };
-const p2 = { id: "p2", name: "二", baseURL: "https://b/v1", model: "m2", apiKey: "", stream: true };
-const withProviders = reduce(initialState(AGENTS), { type: "providerAdd", provider: p1 });
-check("providers: first add becomes active", withProviders.providerId, "p1");
-check("providers: listed", withProviders.providers.length, 1);
-const secondProvider = reduce(withProviders, { type: "providerAdd", provider: p2 });
-check("providers: adding does not steal the active one", secondProvider.providerId, "p1");
+// ------------------------------------------------------- instance/model lists
+const inst1: Instance = {
+  id: "p1",
+  templateId: "custom",
+  name: "一",
+  protocol: "openai-chat",
+  baseURL: "https://a/v1",
+  apiKey: "",
+  stream: true,
+  headers: [],
+};
+const inst2: Instance = { ...inst1, id: "p2", name: "二", baseURL: "https://b/v1" };
+const modelA = newModel("mA");
+const modelB = newModel("mB");
+
+const withInstances = reduce(initialState(AGENTS), {
+  type: "instanceAdd",
+  instance: inst1,
+});
+check("instances: first add becomes active", withInstances.instanceId, "p1");
+const secondInstance = reduce(withInstances, { type: "instanceAdd", instance: inst2 });
 check(
-  "providers: select",
-  reduce(secondProvider, { type: "providerSelect", id: "p2" }).providerId,
+  "instances: adding does not steal the active one",
+  secondInstance.instanceId,
+  "p1",
+);
+check(
+  "instances: select",
+  reduce(secondInstance, { type: "instanceSelect", id: "p2" }).instanceId,
   "p2",
 );
 check(
-  "providers: select unknown is a no-op",
-  reduce(secondProvider, { type: "providerSelect", id: "nope" }) === secondProvider,
+  "instances: select unknown is a no-op",
+  reduce(secondInstance, { type: "instanceSelect", id: "nope" }) === secondInstance,
   true,
 );
 check(
-  "providers: update replaces in place",
-  reduce(secondProvider, {
-    type: "providerUpdate",
-    provider: { ...p1, name: "改" },
-  }).providers[0]?.name,
+  "instances: update replaces in place",
+  reduce(secondInstance, {
+    type: "instanceUpdate",
+    instance: { ...inst1, name: "改" },
+  }).instances[0]?.name,
   "改",
 );
-const afterRemove = reduce(
-  reduce(secondProvider, { type: "providerSelect", id: "p2" }),
-  { type: "providerRemove", id: "p2" },
+
+const withModel = reduce(secondInstance, {
+  type: "modelAdd",
+  instanceId: "p1",
+  model: modelA,
+});
+check("models: added under its instance", withModel.models.p1?.length, 1);
+check("models: first model becomes the active model", withModel.modelId, "mA");
+check("models: endpoint pairs instance and model", endpointOf(withModel), {
+  instance: inst1,
+  model: modelA,
+});
+check(
+  "models: instanceOf follows the selection",
+  instanceOf(withModel, "p1")?.name,
+  "一",
 );
-check("providers: removing the active one falls back", afterRemove.providerId, "p1");
-check("providers: removing leaves the rest", afterRemove.providers.length, 1);
-check("providers: providerOf follows the selection", providerOf(secondProvider)?.id, "p1");
-check("providers: none configured is the mock", providerOf(initialState(AGENTS)), null);
+check(
+  "instances: removing the active one falls back",
+  reduce(secondInstance, { type: "instanceRemove", id: "p2" }).instanceId,
+  "p1",
+);
+check(
+  "instances: removing drops its models",
+  reduce(
+    reduce(withModel, { type: "modelAdd", instanceId: "p2", model: modelB }),
+    { type: "instanceRemove", id: "p2" },
+  ).models,
+  { p1: [modelA] },
+);
+check(
+  "models: unknown model selection is a no-op",
+  reduce(withModel, { type: "modelSelect", modelId: "nope" }) === withModel,
+  true,
+);
+check("instances: none configured is the mock", endpointOf(initialState(AGENTS)), null);
 
 const withAgent = reduce(selected, {
   type: "agentAdd",
@@ -327,58 +392,163 @@ check(
 
 check("ids: unique", newId("c") === newId("c"), false);
 
-// ------------------------------------------------------------------ provider
-check("provider: defaults", normalizeProvider({ baseURL: " https://a/v1 ", model: "m" }), {
-  id: "",
-  name: "m",
-  baseURL: "https://a/v1",
-  model: "m",
-  apiKey: "",
-  stream: true,
-});
+// --------------------------------------------------------------- templates
+check("template: vendor", templateOf("openai").vendor, "OpenAI");
 check(
-  "provider: keeps id and name",
-  normalizeProvider({ id: "p1", name: "DeepSeek", baseURL: "https://a/v1", model: "m" })
-    ?.name,
-  "DeepSeek",
+  "template: deepseek base url",
+  templateOf("deepseek").defaultBaseURL,
+  "https://api.deepseek.com/v1",
 );
-check("provider: needs model", normalizeProvider({ baseURL: "https://a" }), null);
-check("provider: needs baseURL", normalizeProvider({ model: "m" }), null);
-check("provider: rejects junk", normalizeProvider("nope"), null);
-check("title: trims newlines", titleOf("a\n\nb"), "a b");
 check(
-  "title: long is cut",
-  titleOf("一二三四五六七八九十一二三四五六七八九十一二三四五六"),
-  "一二三四五六七八九十一二三四五六七八九十一二三四…",
+  "template: anthropic is messages-only",
+  templateOf("anthropic").protocols,
+  ["anthropic-messages"],
 );
-check("title: empty", titleOf("   "), "新对话");
+check("template: custom offers every protocol", templateOf("custom").protocols.length, 3);
+check(
+  "template: only openai and custom allow a protocol switch",
+  [
+    protocolEditable({ ...inst1, templateId: "openai" }),
+    protocolEditable({ ...inst1, templateId: "anthropic" }),
+    protocolEditable(inst1),
+  ],
+  [true, false, true],
+);
+check("template: vendor is what the form titles", TEMPLATES[0].vendor, "OpenAI");
+
+check(
+  "url: host ignores userinfo, port and case",
+  hostOf("https://user:pw@Proxy.Example.com:8443/v1"),
+  "proxy.example.com",
+);
+check("url: host of junk", hostOf("nope"), "");
+check(
+  "url: a proxy shows its host as the row subtitle",
+  proxyHostOf({ ...inst1, templateId: "openai", baseURL: "https://proxy.example.com/v1" }),
+  "proxy.example.com",
+);
+check(
+  "url: the official host is not a subtitle",
+  proxyHostOf({ ...inst1, templateId: "openai", baseURL: "https://api.openai.com/v1" }),
+  "",
+);
+check("url: invalid is rejected", baseURLError("api.openai.com"), "请输入有效的 URL");
+check("url: valid passes", baseURLError("https://api.openai.com/v1"), null);
+check("name: empty is rejected", newInstance({ templateId: "custom", name: "  ", protocol: "openai-chat", baseURL: "https://a/v1", apiKey: "" }).name, "");
+check("count: none", modelCountLabel(0), "未添加模型");
+check("count: some", modelCountLabel(3), "3 个模型");
+check(
+  "headers: duplicates are caught case-insensitively",
+  duplicateHeader(
+    [
+      { name: "X-Test", value: "1" },
+      { name: "x-test", value: "2" },
+    ],
+    "X-Test",
+  ),
+  true,
+);
+check(
+  "headers: one occurrence is fine",
+  duplicateHeader([{ name: "X-Test", value: "1" }], "x-test"),
+  false,
+);
+check(
+  "thinking: anthropic without an output cap cannot be checked",
+  thinkingError(
+    "anthropic-messages",
+    { enabled: true, effort: null, budget: 2048 },
+    null,
+  ),
+  "请先设置最大输出 token",
+);
+check(
+  "thinking: budget below 1024",
+  thinkingError(
+    "anthropic-messages",
+    { enabled: true, effort: null, budget: 512 },
+    4096,
+  ),
+  "思考预算至少 1024",
+);
+check(
+  "thinking: budget must stay below the cap",
+  thinkingError(
+    "anthropic-messages",
+    { enabled: true, effort: null, budget: 4096 },
+    4096,
+  ),
+  "思考预算必须小于最大输出 token",
+);
+check(
+  "thinking: a valid anthropic budget",
+  thinkingError(
+    "anthropic-messages",
+    { enabled: true, effort: null, budget: 2048 },
+    4096,
+  ),
+  null,
+);
+check(
+  "thinking: other protocols have no budget rule",
+  thinkingError("openai-chat", { enabled: true, effort: "high", budget: 1 }, null),
+  null,
+);
+check(
+  "protocol: labels are user facing",
+  PROTOCOL_LABEL["anthropic-messages"],
+  "Anthropic Messages",
+);
+check(
+  "protocol: custom footer names the paths",
+  protocolFooter("openai-responses"),
+  "将在此地址后拼接 /responses 与 /models。",
+);
 
 // ----------------------------------------------------------------- wire format
-const provider: Provider = {
-  id: "p1",
+const inst: Instance = {
+  id: "i1",
+  templateId: "custom",
   name: "示例服务",
+  protocol: "openai-chat",
   baseURL: "https://api.example.com/v1/",
   apiKey: "sk-1",
-  model: "m",
   stream: true,
+  headers: [{ name: "X-Test", value: "1" }],
 };
+const mdl = newModel("m");
+const ep: Endpoint = { instance: inst, model: mdl };
+const anthropic: Instance = {
+  ...inst,
+  protocol: "anthropic-messages",
+  baseURL: "https://api.anthropic.com",
+  headers: [],
+};
+
 check(
-  "openai: endpoint",
-  endpointOf(provider),
+  "chat: endpoint",
+  chatEndpointOf(inst),
   "https://api.example.com/v1/chat/completions",
 );
 check(
-  "openai: the models endpoint sits beside the chat endpoint",
-  modelsEndpointOf(provider),
+  "models: endpoint sits beside the chat endpoint",
+  modelsEndpointOf(inst),
   "https://api.example.com/v1/models",
 );
 check(
-  "openai: model ids come from the data array",
+  "responses: endpoint",
+  chatEndpointOf({ ...inst, protocol: "openai-responses" }),
+  "https://api.example.com/v1/responses",
+);
+check("anthropic: endpoint", chatEndpointOf(anthropic), "https://api.anthropic.com/v1/messages");
+check("anthropic: models endpoint", modelsEndpointOf(anthropic), "https://api.anthropic.com/v1/models");
+check(
+  "model ids: come from the data array",
   modelIdsOf('{"data":[{"id":"a"},{"id":"b"}]}'),
   ["a", "b"],
 );
 check(
-  "openai: duplicate and unusable model ids are dropped",
+  "model ids: duplicates and unusable entries are dropped",
   modelIdsOf('{"data":[{"id":"a"},{"id":"a"},{"id":""},{"name":"x"},null]}'),
   ["a"],
 );
@@ -390,31 +560,149 @@ const parseFailure = (text: string): string => {
     return normalizeFailure(thrown).kind;
   }
 };
-check("openai: malformed model list is a parse failure", parseFailure("not json"), "parse");
+check("model ids: malformed json is a parse failure", parseFailure("not json"), "parse");
 check(
-  "openai: a body without a data array is a parse failure",
+  "model ids: a body without a data array is a parse failure",
   parseFailure('{"models":[]}'),
   "parse",
 );
-check("openai: auth header", headersOf(provider).authorization, "Bearer sk-1");
+check("headers: bearer plus custom", headersOf(inst), {
+  "content-type": "application/json",
+  authorization: "Bearer sk-1",
+  "X-Test": "1",
+});
 check(
-  "openai: body has only role and content",
+  "headers: anthropic uses x-api-key and injects the version",
+  headersOf(anthropic),
+  {
+    "content-type": "application/json",
+    "x-api-key": "sk-1",
+    "anthropic-version": "2023-06-01",
+  },
+);
+check(
+  "headers: a custom header overrides the derived one",
+  headersOf({ ...inst, headers: [{ name: "Authorization", value: "Bearer own" }] })
+    ["Authorization"],
+  "Bearer own",
+);
+check(
+  "body: chat keeps role and content and nothing else",
   JSON.parse(
-    bodyOf(
-      [{ id: "u1", role: "user", content: "hi", status: "done" }],
-      provider,
-      true,
-    ),
+    bodyOf(inst, mdl, [{ id: "u1", role: "user", content: "hi", status: "done" }], true),
   ),
   { model: "m", stream: true, messages: [{ role: "user", content: "hi" }] },
 );
 check(
-  "openai: completion",
-  completionOf(JSON.stringify({ choices: [{ message: { content: "ok" } }] })),
+  "body: responses wraps the conversation as input",
+  JSON.parse(
+    bodyOf(
+      { ...inst, protocol: "openai-responses" },
+      mdl,
+      [{ id: "u1", role: "user", content: "hi", status: "done" }],
+      false,
+    ),
+  ),
+  { model: "m", stream: false, input: [{ role: "user", content: "hi" }] },
+);
+check(
+  "body: anthropic always carries max_tokens",
+  JSON.parse(
+    bodyOf(anthropic, mdl, [{ id: "u1", role: "user", content: "hi", status: "done" }], true),
+  ),
+  {
+    model: "m",
+    stream: true,
+    max_tokens: 4096,
+    messages: [{ role: "user", content: "hi" }],
+  },
+);
+const thinkingModel: ModelConfig = {
+  ...mdl,
+  maxOutputTokens: 4096,
+  thinking: { enabled: true, effort: null, budget: 2048 },
+};
+check(
+  "body: anthropic thinking budget and suppressed sampling",
+  JSON.parse(
+    bodyOf(anthropic, { ...thinkingModel, temperature: 0.5 }, [], false),
+  ),
+  {
+    model: "m",
+    stream: false,
+    max_tokens: 4096,
+    thinking: { type: "enabled", budget_tokens: 2048 },
+    messages: [],
+  },
+);
+check(
+  "body: openai reasoning effort",
+  JSON.parse(
+    bodyOf(
+      inst,
+      { ...mdl, thinking: { enabled: true, effort: "high", budget: null } },
+      [],
+      true,
+    ),
+  ),
+  { model: "m", stream: true, reasoning_effort: "high", messages: [] },
+);
+check(
+  "completion: chat",
+  completionOf(JSON.stringify({ choices: [{ message: { content: "ok" } }] }), "openai-chat"),
   "ok",
 );
-throws("openai: bad json", () => completionOf("not json"), "parse");
-throws("openai: empty completion", () => completionOf('{"choices":[]}'), "empty");
+check(
+  "completion: responses",
+  completionOf(
+    JSON.stringify({
+      output: [{ content: [{ type: "output_text", text: "ok" }] }],
+    }),
+    "openai-responses",
+  ),
+  "ok",
+);
+check(
+  "completion: anthropic",
+  completionOf(
+    JSON.stringify({ content: [{ type: "text", text: "ok" }] }),
+    "anthropic-messages",
+  ),
+  "ok",
+);
+throws("completion: bad json", () => completionOf("not json", "openai-chat"), "parse");
+throws(
+  "completion: empty",
+  () => completionOf('{"choices":[]}', "openai-chat"),
+  "empty",
+);
+check(
+  "sse: anthropic text delta",
+  readSSELine('data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"hi"}}', "anthropic-messages"),
+  { delta: "hi", done: false },
+);
+check(
+  "sse: anthropic stop",
+  readSSELine('data: {"type":"message_stop"}', "anthropic-messages"),
+  { delta: "", done: true },
+);
+check(
+  "sse: responses delta",
+  readSSELine('data: {"type":"response.output_text.delta","delta":"hi"}', "openai-responses"),
+  { delta: "hi", done: false },
+);
+check(
+  "title: trims newlines",
+  titleOf("a\n\nb"),
+  "a b",
+);
+check(
+  "title: long is cut",
+  titleOf("一二三四五六七八九十一二三四五六七八九十一二三四五六"),
+  "一二三四五六七八九十一二三四五六七八九十一二三四…",
+);
+check("title: empty", titleOf("   "), "新对话");
+
 check(
   "errors: http line",
   describeFailure({ kind: "http", status: 401, detail: "bad key" }),
@@ -472,22 +760,6 @@ check(
   0,
 );
 
-check(
-  "catalog: a known host brings its models",
-  suggestedModels("https://api.deepseek.com/v1"),
-  ["deepseek-chat", "deepseek-reasoner"],
-);
-check(
-  "catalog: an unknown host suggests nothing",
-  suggestedModels("https://example.test/v1"),
-  [],
-);
-check(
-  "catalog: presets come before fetched ids, duplicates once",
-  uniqueModels([["deepseek-chat"], ["deepseek-chat", "custom"]]),
-  ["deepseek-chat", "custom"],
-);
-
 const chat: ChatState = {
   hydrated: true,
   conversations: [
@@ -503,11 +775,12 @@ const chat: ChatState = {
   ],
   currentId: "c1",
   draft: "草稿",
-  providers: [provider],
-  providerId: "p1",
+  instances: [inst],
+  instanceId: "i1",
+  models: { i1: [mdl] },
+  modelId: "m",
   agents: [{ id: "default", title: "Swipt Chat" }],
   agentId: "default",
-  models: {},
   turn: null,
   sheetOpen: false,
 };
@@ -516,10 +789,12 @@ const seed: StoreOp[] = [
   { kind: "session", id: "c1", title: "对话", updatedAt: 5 },
   { kind: "message", sessionId: "c1", seq: 0, message: chat.conversations[0].messages[0] },
   { kind: "message", sessionId: "c1", seq: 1, message: chat.conversations[0].messages[1] },
-  { kind: "provider", provider },
+  { kind: "instance", instance: inst, position: 0 },
+  { kind: "model", instanceId: "i1", model: mdl, position: 0 },
   { kind: "agent", agent: { id: "default", title: "Swipt Chat" } },
   { kind: "state", key: "current_session", value: "c1" },
-  { kind: "state", key: "active_provider", value: "p1" },
+  { kind: "state", key: "active_instance", value: "i1" },
+  { kind: "state", key: "active_model", value: "m" },
   { kind: "state", key: "active_agent", value: "default" },
   { kind: "state", key: "draft", value: "草稿" },
 ];
@@ -528,16 +803,17 @@ check("db: round-trip through rows", await loadSnapshot(db), {
   conversations: chat.conversations,
   currentId: "c1",
   draft: "草稿",
-  providers: [provider],
-  providerId: "p1",
+  instances: [inst],
+  instanceId: "i1",
+  models: { i1: [mdl] },
+  modelId: "m",
   agents: chat.agents,
   agentId: "default",
-  models: {},
 } satisfies Snapshot);
 
 check(
-  "db: api key is not a column of provider",
-  (await db.all<{ name: string }>("PRAGMA table_info(provider)")).some(
+  "db: api key is not a column of instance",
+  (await db.all<{ name: string }>("PRAGMA table_info(instance)")).some(
     (column) => column.name === "api_key",
   ),
   false,
@@ -545,10 +821,18 @@ check(
 check(
   "db: api key lives in its own table",
   (await db.first<{ api_key: string }>(
-    "SELECT api_key FROM provider_secret WHERE provider_id = ?",
-    ["p1"],
+    "SELECT api_key FROM instance_secret WHERE instance_id = ?",
+    ["i1"],
   ))?.api_key,
   "sk-1",
+);
+check(
+  "db: custom headers keep their order",
+  (await db.first<{ name: string; value: string }>(
+    "SELECT name, value FROM instance_header WHERE instance_id = ?",
+    ["i1"],
+  ))?.name,
+  "X-Test",
 );
 
 // The whole point of the rewrite: a streamed token changes exactly one row.
@@ -622,17 +906,19 @@ check(
 check("db: stale current session falls back", (await loadSnapshot(db)).currentId, null);
 
 check(
-  "db: stale active provider falls back to the first service",
+  "db: stale active instance falls back to the first connection",
   (await applyOps(db, [
-    { kind: "state", key: "active_provider", value: "gone" },
+    { kind: "state", key: "active_instance", value: "gone" },
   ])),
   undefined,
 );
+check("db: active instance fallback", (await loadSnapshot(db)).instanceId, "i1");
 check(
-  "db: active provider fallback",
-  (await loadSnapshot(db)).providerId,
-  "p1",
+  "db: stale active model falls back to the instance's first model",
+  (await applyOps(db, [{ kind: "state", key: "active_model", value: "gone" }])),
+  undefined,
 );
+check("db: active model fallback", (await loadSnapshot(db)).modelId, "m");
 
 await applyOps(db, [{ kind: "session.delete", id: "c1" }]);
 check(
@@ -646,55 +932,75 @@ check(
   "草稿",
 );
 
+// ------------------------------------------------------------ model configs
 await applyOps(db, [
-  { kind: "models", providerId: "p1", models: ["b-model", "a-model"] },
+  { kind: "model", instanceId: "i1", model: { ...mdl, displayName: "改名" }, position: 0 },
 ]);
 check(
-  "db: probed models are cached per service",
-  (await loadSnapshot(db)).models,
-  { p1: ["a-model", "b-model"] },
+  "db: editing a model upserts instead of duplicating",
+  (await db.first<{ n: number }>("SELECT count(*) AS n FROM model_config"))?.n,
+  1,
 );
 check(
-  "sync: a changed model list is one op",
-  diffState(chat, { ...chat, models: { p1: ["a-model"] } }).map((op) => op.kind),
-  ["models"],
+  "db: a renamed model keeps its id",
+  (await loadSnapshot(db)).models.i1[0],
+  { ...mdl, displayName: "改名" },
 );
 check(
-  "sync: an unchanged model list writes nothing",
-  diffState({ ...chat, models: { p1: ["a"] } }, { ...chat, models: { p1: ["a"] } }),
+  "sync: a changed model is one op",
+  diffState(chat, {
+    ...chat,
+    models: { i1: [{ ...mdl, displayName: "改名" }] },
+  }).map((op) => op.kind),
+  ["model"],
+);
+check(
+  "sync: an unchanged model writes nothing",
+  diffState(
+    { ...chat, models: { i1: [mdl] } },
+    { ...chat, models: { i1: [mdl] } },
+  ),
   [],
 );
 
-const withModels = reduce(chat, {
-  type: "models",
-  providerId: "p1",
-  models: ["m1", "m2"],
+const withRenamed = reduce(chat, {
+  type: "modelUpdate",
+  instanceId: "i1",
+  model: { ...mdl, displayName: "改名" },
 });
-check("state: a probe result is stored per service", withModels.models, {
-  p1: ["m1", "m2"],
-});
+check("state: a model is edited in place", withRenamed.models.i1[0].displayName, "改名");
 check(
-  "state: the same list twice is not a new state",
-  reduce(withModels, { type: "models", providerId: "p1", models: ["m1", "m2"] }) ===
-    withModels,
+  "state: the same model twice is not a new state",
+  reduce(withRenamed, {
+    type: "modelUpdate",
+    instanceId: "i1",
+    model: { ...mdl, displayName: "改名" },
+  }) === withRenamed,
   true,
 );
 check(
-  "state: removing a service drops its models",
-  reduce(withModels, { type: "providerRemove", id: "p1" }).models,
+  "state: removing a connection drops its models",
+  reduce(withRenamed, { type: "instanceRemove", id: "i1" }).models,
   {},
 );
 
-await applyOps(db, [{ kind: "provider.delete", id: "p1" }]);
+await applyOps(db, [{ kind: "instance.delete", id: "i1" }]);
 check(
-  "db: deleting a service drops its models",
-  (await db.first<{ n: number }>("SELECT count(*) AS n FROM model"))?.n,
+  "db: deleting a connection drops its models",
+  (await db.first<{ n: number }>("SELECT count(*) AS n FROM model_config"))?.n,
   0,
 );
 check(
-  "db: deleting a provider drops its key",
+  "db: deleting a connection drops its key",
   (await db.first<{ n: number }>(
-    "SELECT count(*) AS n FROM provider_secret",
+    "SELECT count(*) AS n FROM instance_secret",
+  ))?.n,
+  0,
+);
+check(
+  "db: deleting a connection drops its headers",
+  (await db.first<{ n: number }>(
+    "SELECT count(*) AS n FROM instance_header",
   ))?.n,
   0,
 );

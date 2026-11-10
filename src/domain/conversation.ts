@@ -1,5 +1,7 @@
-import { activeProvider } from "./provider.ts";
-import type { Agent, Conversation, Message, Provider, Turn } from "./types.ts";
+import type { Endpoint, Instance, ModelConfig } from "./service.ts";
+import { sameInstance, sameModelConfig } from "./service.ts";
+import { firstModelOf } from "./service.ts";
+import type { Agent, Conversation, Message, Turn } from "./types.ts";
 
 /**
  * The chat state machine.
@@ -26,11 +28,13 @@ export interface ChatState {
   draft: string;
   agents: Agent[];
   agentId: string;
-  /** Every configured service; the chat uses whichever `providerId` names. */
-  providers: Provider[];
-  providerId: string | null;
-  /** Model ids the services reported, keyed by provider id. */
-  models: Record<string, string[]>;
+  /** Every configured connection; the chat uses whichever `instanceId` names. */
+  instances: Instance[];
+  instanceId: string | null;
+  /** Models configured under each instance, keyed by instance id. */
+  models: Record<string, ModelConfig[]>;
+  /** The model the chat sends to; `null` falls back to the offline mock. */
+  modelId: string | null;
   turn: Turn | null;
   sheetOpen: boolean;
 }
@@ -41,11 +45,12 @@ export type ChatAction =
       conversations: Conversation[];
       currentId: string | null;
       draft: string;
-      providers: Provider[];
-      providerId: string | null;
+      instances: Instance[];
+      instanceId: string | null;
+      models?: Record<string, ModelConfig[]>;
+      modelId: string | null;
       agents: Agent[];
       agentId: string | null;
-      models?: Record<string, string[]>;
     }
   | { type: "draft"; text: string }
   | { type: "select"; id: string }
@@ -56,11 +61,14 @@ export type ChatAction =
   | { type: "agent"; id: string }
   | { type: "agentAdd"; agent: Agent }
   | { type: "agentRemove"; id: string }
-  | { type: "providerAdd"; provider: Provider }
-  | { type: "providerUpdate"; provider: Provider }
-  | { type: "providerRemove"; id: string }
-  | { type: "providerSelect"; id: string }
-  | { type: "models"; providerId: string; models: string[] }
+  | { type: "instanceAdd"; instance: Instance }
+  | { type: "instanceUpdate"; instance: Instance }
+  | { type: "instanceRemove"; id: string }
+  | { type: "instanceSelect"; id: string }
+  | { type: "modelAdd"; instanceId: string; model: ModelConfig }
+  | { type: "modelUpdate"; instanceId: string; model: ModelConfig }
+  | { type: "modelRemove"; instanceId: string; modelId: string }
+  | { type: "modelSelect"; modelId: string }
   | {
       type: "begin";
       conversationId: string;
@@ -84,8 +92,10 @@ export type ChatAction =
 
 export function initialState(
   agents: Agent[],
-  providers: Provider[] = [],
+  instances: Instance[] = [],
+  models: Record<string, ModelConfig[]> = {},
 ): ChatState {
+  const first = instances[0] ?? null;
   return {
     hydrated: false,
     conversations: [],
@@ -93,17 +103,39 @@ export function initialState(
     draft: "",
     agents,
     agentId: agents[0]?.id ?? "default",
-    providers,
-    providerId: providers[0]?.id ?? null,
-    models: {},
+    instances,
+    instanceId: first?.id ?? null,
+    models,
+    modelId: first === null ? null : (firstModelOf(models[first.id] ?? [])?.id ?? null),
     turn: null,
     sheetOpen: false,
   };
 }
 
-/** The provider the open chat talks to; `null` means the offline mock. */
-export const providerOf = (state: ChatState): Provider | null =>
-  activeProvider(state.providers, state.providerId);
+export const instanceOf = (
+  state: ChatState,
+  id: string | null,
+): Instance | null =>
+  id === null ? null : (state.instances.find((item) => item.id === id) ?? null);
+
+/**
+ * The connection and model the open chat talks to.
+ *
+ * `null` means the offline mock: either nothing is configured yet, or the
+ * selected instance has no models — in both cases a real request cannot be
+ * formed, and the chat stays usable instead of failing on send.
+ */
+export function endpointOf(state: ChatState): Endpoint | null {
+  const instance = instanceOf(state, state.instanceId);
+  if (instance === null) {
+    return null;
+  }
+  const models = state.models[instance.id] ?? [];
+  const model =
+    models.find((item) => item.id === state.modelId) ??
+    firstModelOf(models);
+  return model === undefined ? null : { instance, model };
+}
 
 export function conversationOf(
   state: ChatState,
@@ -148,21 +180,49 @@ function patchMessage(
   return { ...conversation, messages, updatedAt: Date.now() };
 }
 
+function patchModels(
+  state: ChatState,
+  instanceId: string,
+  models: ModelConfig[],
+): ChatState {
+  return { ...state, models: { ...state.models, [instanceId]: models } };
+}
+
+function modelIdAfter(state: ChatState, instanceId: string): string | null {
+  return firstModelOf(state.models[instanceId] ?? [])?.id ?? null;
+}
+
 export function reduce(state: ChatState, action: ChatAction): ChatState {
   switch (action.type) {
-    case "hydrate":
+    case "hydrate": {
+      const models = action.models ?? {};
+      const instance =
+        action.instanceId === null
+          ? (action.instances[0] ?? null)
+          : (action.instances.find((item) => item.id === action.instanceId) ??
+            action.instances[0] ??
+            null);
+      const modelId =
+        action.modelId !== null &&
+        (models[instance?.id ?? ""] ?? []).some((item) => item.id === action.modelId)
+          ? action.modelId
+          : instance === null
+            ? null
+            : (firstModelOf(models[instance.id] ?? [])?.id ?? null);
       return {
         ...state,
         hydrated: true,
         conversations: action.conversations,
         currentId: action.currentId,
         draft: action.draft,
-        providers: action.providers,
-        providerId: action.providerId,
+        instances: action.instances,
+        instanceId: instance?.id ?? null,
+        models,
+        modelId,
         agents: action.agents.length === 0 ? state.agents : action.agents,
         agentId: action.agentId ?? state.agentId,
-        models: action.models ?? {},
       };
+    }
 
     case "draft":
       return state.draft === action.text ? state : { ...state, draft: action.text };
@@ -217,62 +277,133 @@ export function reduce(state: ChatState, action: ChatAction): ChatState {
       };
     }
 
-    case "providerAdd":
+    case "instanceAdd": {
+      const instances = [...state.instances, action.instance];
+      // The first connection added becomes the active one: a freshly configured
+      // chat should use it without a second tap.
+      const active = state.instanceId === null;
       return {
         ...state,
-        providers: [...state.providers, action.provider],
-        // The first service added becomes the active one: a freshly configured
-        // chat should use it without a second tap.
-        providerId: state.providerId ?? action.provider.id,
+        instances,
+        instanceId: active ? action.instance.id : state.instanceId,
+        modelId: active ? modelIdAfter(state, action.instance.id) : state.modelId,
       };
-
-    case "providerUpdate": {
-      const index = state.providers.findIndex((item) => item.id === action.provider.id);
-      if (index === -1) {
-        return state.providers.some((item) => item.id === action.provider.id)
-          ? state
-          : { ...state, providers: [...state.providers, action.provider], providerId: state.providerId ?? action.provider.id };
-      }
-      const providers = [...state.providers];
-      providers[index] = action.provider;
-      return { ...state, providers };
     }
 
-    case "providerRemove": {
-      const providers = state.providers.filter((item) => item.id !== action.id);
-      if (providers.length === state.providers.length) {
+    case "instanceUpdate": {
+      const index = state.instances.findIndex((item) => item.id === action.instance.id);
+      if (index === -1) {
+        const instances = [...state.instances, action.instance];
+        return {
+          ...state,
+          instances,
+          instanceId: state.instanceId ?? action.instance.id,
+        };
+      }
+      const instances = [...state.instances];
+      instances[index] = action.instance;
+      // A protocol or address change keeps the models: the spec only asks for a
+      // warning, never a delete. The selected model stays selected.
+      return { ...state, instances };
+    }
+
+    case "instanceRemove": {
+      const instances = state.instances.filter((item) => item.id !== action.id);
+      if (instances.length === state.instances.length) {
         return state;
       }
       const models = { ...state.models };
       delete models[action.id];
+      const nextId =
+        state.instanceId === action.id
+          ? (instances[0]?.id ?? null)
+          : state.instanceId;
+      const keepModel =
+        state.instanceId !== action.id &&
+        (models[state.instanceId ?? ""] ?? []).some((item) => item.id === state.modelId);
       return {
         ...state,
-        providers,
+        instances,
         models,
-        providerId:
-          state.providerId === action.id ? (providers[0]?.id ?? null) : state.providerId,
+        instanceId: nextId,
+        modelId: keepModel
+          ? state.modelId
+          : nextId === null
+            ? null
+            : modelIdAfter({ ...state, models }, nextId),
       };
     }
 
-    case "models": {
-      const previous = state.models[action.providerId];
+    case "instanceSelect":
       if (
-        previous !== undefined &&
-        previous.length === action.models.length &&
-        previous.every((id, index) => id === action.models[index])
+        action.id === state.instanceId ||
+        !state.instances.some((item) => item.id === action.id)
       ) {
         return state;
       }
       return {
         ...state,
-        models: { ...state.models, [action.providerId]: action.models },
+        instanceId: action.id,
+        modelId: modelIdAfter(state, action.id),
+      };
+
+    case "modelAdd": {
+      const current = state.models[action.instanceId] ?? [];
+      if (current.some((item) => item.id === action.model.id)) {
+        return state;
+      }
+      const models = patchModels(state, action.instanceId, [
+        ...current,
+        action.model,
+      ]);
+      // Adding the first model to the active instance makes it the chat's model.
+      return state.modelId === null && state.instanceId === action.instanceId
+        ? { ...models, modelId: action.model.id }
+        : models;
+    }
+
+    case "modelUpdate": {
+      const current = state.models[action.instanceId] ?? [];
+      const index = current.findIndex((item) => item.id === action.model.id);
+      if (index === -1) {
+        return state;
+      }
+      if (sameModelConfig(current[index], action.model)) {
+        return state;
+      }
+      const next = [...current];
+      next[index] = action.model;
+      return patchModels(state, action.instanceId, next);
+    }
+
+    case "modelRemove": {
+      const current = state.models[action.instanceId] ?? [];
+      const next = current.filter((item) => item.id !== action.modelId);
+      if (next.length === current.length) {
+        return state;
+      }
+      return {
+        ...state,
+        models: { ...state.models, [action.instanceId]: next },
+        modelId:
+          state.modelId === action.modelId
+            ? state.instanceId === action.instanceId
+              ? (firstModelOf(next)?.id ?? null)
+              : state.modelId
+            : state.modelId,
       };
     }
 
-    case "providerSelect":
-      return action.id === state.providerId || !state.providers.some((item) => item.id === action.id)
-        ? state
-        : { ...state, providerId: action.id };
+    case "modelSelect": {
+      const current = state.models[state.instanceId ?? ""] ?? [];
+      if (
+        action.modelId === state.modelId ||
+        !current.some((item) => item.id === action.modelId)
+      ) {
+        return state;
+      }
+      return { ...state, modelId: action.modelId };
+    }
 
     case "begin": {
       const user: Message = {

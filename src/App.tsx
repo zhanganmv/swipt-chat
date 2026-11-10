@@ -13,12 +13,12 @@ import {
   ignoreSafeArea,
 } from "@expo/ui/swift-ui/modifiers";
 
-import type { Provider } from "./domain/types.ts";
+import type { Instance, TemplateId } from "./domain/service.ts";
 import { ChatScreen } from "./screens/ChatScreen.tsx";
 import { SettingsPages } from "./screens/SettingsScreen.tsx";
 import { AgentPickerSheet } from "./shell/AgentPickerSheet.tsx";
 import { AgentSheet } from "./shell/AgentSheet.tsx";
-import { ProviderSheet } from "./shell/ProviderSheet.tsx";
+import { InstanceSheet } from "./shell/InstanceSheet.tsx";
 import { SessionListSheet, type SessionRow } from "./shell/SessionListSheet.tsx";
 import { useChat } from "./state/useChat.ts";
 import { ThemeProvider, useTheme } from "./theme/index.tsx";
@@ -52,14 +52,9 @@ function Shell() {
   // list, and one more entry for each capability page below it.
   const [path, setPath] = useState<string[]>([]);
 
-  // `providerForm` is what the sheet is editing; `providerOpen` is whether it is
-  // on screen. They are separate on purpose: clearing the record on close would
-  // re-key the form to "new" and blank every field while the sheet is still
-  // sliding away.
-  const [providerForm, setProviderForm] = useState<{ provider: Provider | null } | null>(
-    null,
-  );
-  const [providerOpen, setProviderOpen] = useState(false);
+  // Which template the creation sheet was opened from (null = closed).
+  const [createTemplate, setCreateTemplate] = useState<TemplateId | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
   const [agentForm, setAgentForm] = useState(false);
   const [agentPicker, setAgentPicker] = useState(false);
 
@@ -93,19 +88,23 @@ function Shell() {
     setPath([]);
   }, [actions]);
 
-  const addProvider = useCallback(() => {
-    setProviderForm({ provider: null });
-    setProviderOpen(true);
+  const startCreate = useCallback((templateId: TemplateId) => {
+    setCreateTemplate(templateId);
+    setCreateOpen(true);
   }, []);
-  const editProvider = useCallback((provider: Provider) => {
-    setProviderForm({ provider });
-    setProviderOpen(true);
-  }, []);
-  const closeProviderForm = useCallback(() => setProviderOpen(false), []);
-  const saveProvider = useCallback(
-    (next: Provider) => {
-      actions.saveProvider(next);
-      setProviderOpen(false);
+  const closeCreate = useCallback(() => setCreateOpen(false), []);
+  const createInstance = useCallback(
+    (draft: Omit<Instance, "id">) => {
+      const id = actions.addInstance(draft);
+      setCreateOpen(false);
+      setPath(["settings", "modelService", `instance/${id}`]);
+    },
+    [actions],
+  );
+  const deleteInstance = useCallback(
+    (instance: Instance) => {
+      actions.removeInstance(instance.id);
+      setPath(["settings", "modelService"]);
     },
     [actions],
   );
@@ -184,15 +183,14 @@ function Shell() {
           </ZStack>
 
           <SettingsPages
-            providers={state.providers}
+            instances={state.instances}
+            models={state.models}
             agents={state.agents}
-            providerId={state.providerId}
             agentId={state.agentId}
             sessionCount={state.conversations.length}
-            onAddProvider={addProvider}
-            onEditProvider={editProvider}
-            onDeleteProvider={actions.removeProvider}
-            onSelectProvider={actions.selectProvider}
+            actions={actions}
+            onCreateInstance={startCreate}
+            onDeleteInstance={deleteInstance}
             onAddAgent={addAgent}
             onDeleteAgent={actions.removeAgent}
             onSelectAgent={actions.selectAgent}
@@ -215,17 +213,11 @@ function Shell() {
         onDelete={actions.deleteSession}
       />
 
-      <ProviderSheet
-        visible={providerOpen}
-        provider={providerForm?.provider ?? null}
-        models={
-          providerForm?.provider == null
-            ? []
-            : (state.models[providerForm.provider.id] ?? [])
-        }
-        onClose={closeProviderForm}
-        onSave={saveProvider}
-        onFetchModels={actions.fetchModels}
+      <InstanceSheet
+        visible={createOpen}
+        templateId={createTemplate}
+        onClose={closeCreate}
+        onCreate={createInstance}
       />
 
       <AgentSheet

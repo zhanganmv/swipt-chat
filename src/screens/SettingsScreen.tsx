@@ -29,9 +29,18 @@ import {
   shapes,
 } from "@expo/ui/swift-ui/modifiers";
 
-import { providerNameOf } from "../domain/provider.ts";
-import type { Agent, Provider } from "../domain/types.ts";
+import {
+  newModel,
+  type Instance,
+  type ModelConfig,
+  type TemplateId,
+} from "../domain/service.ts";
+import type { Agent } from "../domain/types.ts";
+import type { ChatActions } from "../state/useChat.ts";
 import { useTheme } from "../theme/index.tsx";
+import { InstancePage } from "./InstancePage.tsx";
+import { ModelPage } from "./ModelPage.tsx";
+import { ModelServiceHome } from "./ModelServiceHome.tsx";
 
 /**
  * Settings, all native — the settings half of the app's single `NavigationStack`.
@@ -51,28 +60,26 @@ import { useTheme } from "../theme/index.tsx";
  * page is hidden behind the chat.
  */
 export const SettingsPages = memo(function SettingsPages({
-  providers,
+  instances,
+  models,
   agents,
-  providerId,
   agentId,
   sessionCount,
-  onAddProvider,
-  onEditProvider,
-  onDeleteProvider,
-  onSelectProvider,
+  actions,
+  onCreateInstance,
+  onDeleteInstance,
   onAddAgent,
   onDeleteAgent,
   onSelectAgent,
 }: {
-  providers: Provider[];
-  agents: Agent[];
-  providerId: string | null;
+  instances: readonly Instance[];
+  models: Record<string, ModelConfig[]>;
+  agents: readonly Agent[];
   agentId: string | null;
   sessionCount: number;
-  onAddProvider: () => void;
-  onEditProvider: (provider: Provider) => void;
-  onDeleteProvider: (id: string) => void;
-  onSelectProvider: (id: string) => void;
+  actions: ChatActions;
+  onCreateInstance: (templateId: TemplateId) => void;
+  onDeleteInstance: (instance: Instance) => void;
   onAddAgent: () => void;
   onDeleteAgent: (id: string) => void;
   onSelectAgent: (id: string) => void;
@@ -92,10 +99,10 @@ export const SettingsPages = memo(function SettingsPages({
             >
               <Section title="对话">
                 <Row
-                  value="providers"
+                  value="modelService"
                   title="模型服务"
                   icon="server.rack"
-                  trailing={`${providers.length}`}
+                  trailing={`${instances.length}`}
                 />
                 <Row
                   value="agents"
@@ -117,96 +124,48 @@ export const SettingsPages = memo(function SettingsPages({
           </Toolbar>
       </NavigationDestination>
 
-      <NavigationDestination value="providers">
-            <Toolbar>
-              <List
-                modifiers={[
-                  listStyle("insetGrouped"),
-                  navigationTitle("模型服务"),
-                  navigationBarTitleDisplayMode("inline"),
-                ]}
-              >
-                {providers.length === 0 ? (
-                  <Section
-                    footer={
-                      <Footer text="点右上角「添加」，填入接口地址与模型名即可开始对话" />
-                    }
-                  >
-                    <Empty text="还没有模型服务" />
-                  </Section>
-                ) : (
-                  <Section footer={<Footer text="长按可设为当前或删除" />}>
-                    {providers.map((provider) => (
-                      <ContextMenu key={provider.id}>
-                        <ContextMenu.Trigger>
-                          <Button
-                            onPress={() => onEditProvider(provider)}
-                            modifiers={[
-                              buttonStyle("plain"),
-                              contentShape(shapes.rectangle()),
-                            ]}
-                          >
-                            <HStack
-                              spacing={12}
-                              modifiers={[
-                                frame({ maxWidth: 10000, alignment: "leading" }),
-                              ]}
-                            >
-                              <VStack alignment="leading" spacing={2}>
-                                <Text
-                                  modifiers={[font({ size: 16, weight: "semibold" })]}
-                                >
-                                  {providerNameOf(provider)}
-                                </Text>
-                                <Text
-                                  modifiers={[
-                                    font({ size: 13 }),
-                                    foregroundStyle(colors["muted-foreground"]),
-                                  ]}
-                                >
-                                  {provider.model}
-                                </Text>
-                              </VStack>
-                              <Spacer />
-                              {provider.id === providerId ? (
-                                <Image
-                                  systemName="checkmark"
-                                  size={15}
-                                  color={colors.primary}
-                                />
-                              ) : null}
-                            </HStack>
-                          </Button>
-                        </ContextMenu.Trigger>
-                        <ContextMenu.Items>
-                          <Button
-                            label="设为当前"
-                            systemImage="checkmark.circle"
-                            onPress={() => onSelectProvider(provider.id)}
-                          />
-                          <Button
-                            label="删除"
-                            systemImage="trash"
-                            role="destructive"
-                            onPress={() => onDeleteProvider(provider.id)}
-                          />
-                        </ContextMenu.Items>
-                      </ContextMenu>
-                    ))}
-                  </Section>
-                )}
-              </List>
-              <Toolbar.Content>
-                <ToolbarItem placement="topBarTrailing">
-                  <Button
-                    label="添加"
-                    onPress={onAddProvider}
-                    modifiers={[buttonStyle("plain")]}
-                  />
-                </ToolbarItem>
-              </Toolbar.Content>
-            </Toolbar>
+      <NavigationDestination value="modelService">
+        <ModelServiceHome
+          instances={instances}
+          models={models}
+          onCreate={onCreateInstance}
+          onDelete={onDeleteInstance}
+        />
+      </NavigationDestination>
+
+      {instances.map((instance) => (
+        <NavigationDestination key={instance.id} value={`instance/${instance.id}`}>
+          <InstancePage
+            instance={instance}
+            models={models[instance.id] ?? []}
+            onUpdate={actions.updateInstance}
+            onDelete={onDeleteInstance}
+            onFetchModels={actions.fetchModels}
+            onAddModels={(instanceId, ids) => {
+              for (const id of ids) {
+                actions.addModel(instanceId, newModel(id));
+              }
+            }}
+            onAddModel={actions.addModel}
+            onDeleteModel={actions.removeModel}
+          />
+        </NavigationDestination>
+      ))}
+
+      {instances.flatMap((instance) =>
+        (models[instance.id] ?? []).map((model) => (
+          <NavigationDestination
+            key={`${instance.id}/${model.id}`}
+            value={`model/${instance.id}/${model.id}`}
+          >
+            <ModelPage
+              instance={instance}
+              model={model}
+              onChange={(next) => actions.updateModel(instance.id, next)}
+            />
           </NavigationDestination>
+        )),
+      )}
 
           <NavigationDestination value="agents">
             <Toolbar>

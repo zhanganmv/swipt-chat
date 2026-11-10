@@ -31,17 +31,6 @@ export interface Conversation {
   updatedAt: number;
 }
 
-/** OpenAI-compatible endpoint configuration; the list is what 模型服务 shows. */
-export interface Provider {
-  id: string;
-  /** User-facing name in the service list; falls back to the model name. */
-  name: string;
-  baseURL: string;
-  apiKey: string;
-  model: string;
-  stream: boolean;
-}
-
 export interface Agent {
   id: string;
   title: string;
@@ -52,5 +41,3 @@ export interface Turn {
   conversationId: string;
   messageId: string;
 }
-
-export const PROVIDER_PLACEHOLDER = "本地 Mock";

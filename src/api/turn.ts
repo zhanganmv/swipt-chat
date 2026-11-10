@@ -1,8 +1,9 @@
 import { logLine } from "../log.ts";
 import { runMock } from "../dev/mock.ts";
-import type { Message, Provider } from "../domain/types.ts";
+import type { Endpoint } from "../domain/service.ts";
+import type { Message } from "../domain/types.ts";
 import { ChatFailure } from "./errors.ts";
-import { completionOf } from "./openai.ts";
+import { completionOf } from "./protocol.ts";
 import { requestChat } from "./request.ts";
 import { assertStreamNotEmpty, readDeltas } from "./stream.ts";
 
@@ -19,25 +20,35 @@ export interface TurnOptions {
  * `normalizeFailure` at the call site.
  */
 export async function runTurn(
-  provider: Provider | null,
+  endpoint: Endpoint | null,
   messages: readonly Message[],
   { onDelta, signal }: TurnOptions,
 ): Promise<void> {
-  if (provider === null) {
+  if (endpoint === null) {
     await runMock(messages, onDelta, signal);
     return;
   }
 
-  await logLine(`turn: ${provider.model} stream=${provider.stream}`);
+  const { instance, model } = endpoint;
+  await logLine(
+    `turn: ${instance.name}/${model.id} ${instance.protocol} stream=${instance.stream}`,
+  );
   try {
-    const response = await requestChat(provider, messages, provider.stream, signal);
-    if (provider.stream) {
+    const response = await requestChat(
+      endpoint,
+      messages,
+      instance.stream,
+      signal,
+    );
+    if (instance.stream) {
       if (response.body === null) {
         throw new ChatFailure({ kind: "empty", detail: "响应没有 body" });
       }
-      assertStreamNotEmpty(await readDeltas(response.body, onDelta));
+      assertStreamNotEmpty(
+        await readDeltas(response.body, onDelta, instance.protocol),
+      );
     } else {
-      onDelta(completionOf(await response.text()));
+      onDelta(completionOf(await response.text(), instance.protocol));
     }
   } catch (thrown) {
     await logLine(

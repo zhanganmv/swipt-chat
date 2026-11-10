@@ -16,7 +16,7 @@
  */
 import type { SqlDriver } from "./sql.ts";
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export interface Migration {
   version: number;
@@ -85,9 +85,91 @@ const V2 = [
    )`,
 ] as const;
 
+/**
+ * v3: one service = a template-created *instance* plus the models configured
+ * under it. v2 kept a single flat provider row with one model name, which cannot
+ * express "OpenAI main account with three models".
+ *
+ * Existing v2 rows are carried over as 自定义 instances so an upgrade does not
+ * silently drop a working API key. The shape is lossy on purpose — the old row
+ * had no protocol and no per-model settings — and every copied model starts
+ * with the defaults.
+ */
+const V3 = [
+  `CREATE TABLE instance (
+     id TEXT PRIMARY KEY NOT NULL,
+     template_id TEXT NOT NULL,
+     name TEXT NOT NULL,
+     protocol TEXT NOT NULL,
+     base_url TEXT NOT NULL,
+     stream INTEGER NOT NULL DEFAULT 1,
+     position INTEGER NOT NULL,
+     created_at INTEGER NOT NULL,
+     updated_at INTEGER NOT NULL
+   )`,
+  `CREATE TABLE instance_secret (
+     instance_id TEXT PRIMARY KEY NOT NULL
+       REFERENCES instance(id) ON DELETE CASCADE,
+     api_key TEXT NOT NULL
+   )`,
+  `CREATE TABLE instance_header (
+     instance_id TEXT NOT NULL
+       REFERENCES instance(id) ON DELETE CASCADE,
+     position INTEGER NOT NULL,
+     name TEXT NOT NULL,
+     value TEXT NOT NULL,
+     PRIMARY KEY (instance_id, position)
+   )`,
+  `CREATE TABLE model_config (
+     instance_id TEXT NOT NULL
+       REFERENCES instance(id) ON DELETE CASCADE,
+     id TEXT NOT NULL,
+     display_name TEXT NOT NULL,
+     note TEXT NOT NULL DEFAULT '',
+     max_output_tokens INTEGER,
+     context_window INTEGER,
+     thinking INTEGER NOT NULL DEFAULT 0,
+     effort TEXT,
+     budget INTEGER,
+     temperature REAL,
+     top_p REAL,
+     image INTEGER NOT NULL DEFAULT 0,
+     position INTEGER NOT NULL,
+     created_at INTEGER NOT NULL,
+     updated_at INTEGER NOT NULL,
+     PRIMARY KEY (instance_id, id)
+   )`,
+  `INSERT INTO instance
+     (id, template_id, name, protocol, base_url, stream, position, created_at, updated_at)
+   SELECT id, 'custom', name, 'openai-chat', base_url, stream, created_at, created_at, updated_at
+   FROM provider`,
+  `INSERT INTO instance_secret (instance_id, api_key)
+   SELECT provider_id, api_key FROM provider_secret`,
+  `INSERT INTO model_config
+     (instance_id, id, display_name, note, max_output_tokens, context_window,
+      thinking, effort, budget, temperature, top_p, image, position, created_at, updated_at)
+   SELECT provider_id, model_id, model_id, '', NULL, NULL, 0, NULL, NULL,
+          NULL, NULL, 0, 0, created_at, created_at
+   FROM model`,
+  `INSERT INTO app_state (key, value)
+   SELECT 'active_instance_id', value FROM app_state WHERE key = 'active_provider'`,
+  `INSERT INTO app_state (key, value)
+   SELECT 'active_model_id', model_id FROM model
+   WHERE provider_id = (SELECT value FROM app_state WHERE key = 'active_provider')
+     AND EXISTS (SELECT 1 FROM model
+                 WHERE provider_id = (SELECT value FROM app_state WHERE key = 'active_provider'))
+   ORDER BY model_id
+   LIMIT 1`,
+  `DELETE FROM app_state WHERE key = 'active_provider'`,
+  `DROP TABLE model`,
+  `DROP TABLE provider_secret`,
+  `DROP TABLE provider`,
+] as const;
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, statements: V1 },
   { version: 2, statements: V2 },
+  { version: 3, statements: V3 },
 ];
 
 const ignore = (thrown: unknown): void => {

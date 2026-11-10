@@ -5,15 +5,16 @@ import { describeFailure, normalizeFailure } from "../api/errors.ts";
 import { requestModels } from "../api/request.ts";
 import { runTurn } from "../api/turn.ts";
 import {
+  endpointOf,
   initialState,
   messagesOf,
-  providerOf,
   reduce,
   type ChatState,
 } from "../domain/conversation.ts";
 import { newId } from "../domain/ids.ts";
-import { modelNameOf, titleOf } from "../domain/provider.ts";
-import type { Agent, Message, Provider } from "../domain/types.ts";
+import { modelNameOf, type Instance, type ModelConfig } from "../domain/service.ts";
+import { titleOf } from "../domain/title.ts";
+import type { Agent, Message } from "../domain/types.ts";
 import { logLine } from "../log.ts";
 import { openDeviceStore } from "./deviceSql.ts";
 import type { Snapshot, Store } from "./store.ts";
@@ -43,16 +44,21 @@ export interface ChatActions {
   selectAgent(id: string): void;
   addAgent(title: string): void;
   removeAgent(id: string): void;
-  /** An empty `id` adds a new service, otherwise the matching one is replaced. */
-  saveProvider(provider: Provider): void;
-  removeProvider(id: string): void;
-  selectProvider(id: string): void;
+  /** Creates a connection and returns its id so the caller can push its page. */
+  addInstance(instance: Omit<Instance, "id">): string;
+  updateInstance(instance: Instance): void;
+  removeInstance(id: string): void;
+  selectInstance(id: string): void;
+  addModel(instanceId: string, model: ModelConfig): void;
+  updateModel(instanceId: string, model: ModelConfig): void;
+  removeModel(instanceId: string, modelId: string): void;
+  selectModel(modelId: string): void;
   /**
-   * Lists the service's models and caches them. Doubles as the connectivity
-   * probe: it throws a classified failure when the address or key is wrong.
-   * An unsaved service (`id === ""`) is not cached — there is no row yet.
+   * Lists the instance's models. Doubles as the connectivity probe: it throws a
+   * classified failure when the address, key or protocol is wrong. Nothing is
+   * persisted — the caller decides which candidates the user adds.
    */
-  fetchModels(provider: Provider): Promise<string[]>;
+  fetchModels(instance: Instance): Promise<string[]>;
 }
 
 export interface UseChat {
@@ -60,7 +66,8 @@ export interface UseChat {
   messages: readonly Message[];
   streaming: boolean;
   modelLabel: string;
-  provider: Provider | null;
+  /** The connection and model the next turn goes to; `null` = offline mock. */
+  endpoint: ReturnType<typeof endpointOf>;
   actions: ChatActions;
 }
 
@@ -148,11 +155,12 @@ export function useChat(): UseChat {
         conversations: snapshot?.conversations ?? [],
         currentId: snapshot?.currentId ?? null,
         draft: snapshot?.draft ?? "",
-        providers: snapshot?.providers ?? [],
-        providerId: snapshot?.providerId ?? null,
+        instances: snapshot?.instances ?? [],
+        instanceId: snapshot?.instanceId ?? null,
+        models: snapshot?.models ?? {},
+        modelId: snapshot?.modelId ?? null,
         agents: snapshot?.agents ?? [],
         agentId: snapshot?.agentId ?? null,
-        models: snapshot?.models ?? {},
       });
     })();
     return () => {
@@ -262,7 +270,7 @@ export function useChat(): UseChat {
 
     void (async () => {
       try {
-        await runTurn(providerOf(current), request, {
+        await runTurn(endpointOf(current), request, {
           signal: abort.signal,
           onDelta: enqueue,
         });
@@ -345,28 +353,43 @@ export function useChat(): UseChat {
     dispatch({ type: "agentRemove", id });
   }, []);
 
-  const saveProvider = useCallback((next: Provider) => {
-    if (next.id === "") {
-      dispatch({ type: "providerAdd", provider: { ...next, id: newId("p") } });
-      return;
-    }
-    dispatch({ type: "providerUpdate", provider: next });
+  const addInstance = useCallback((next: Omit<Instance, "id">): string => {
+    const id = newId("i");
+    dispatch({ type: "instanceAdd", instance: { ...next, id } });
+    return id;
   }, []);
 
-  const removeProvider = useCallback((id: string) => {
-    dispatch({ type: "providerRemove", id });
+  const updateInstance = useCallback((instance: Instance) => {
+    dispatch({ type: "instanceUpdate", instance });
   }, []);
 
-  const selectProvider = useCallback((id: string) => {
-    dispatch({ type: "providerSelect", id });
+  const removeInstance = useCallback((id: string) => {
+    dispatch({ type: "instanceRemove", id });
   }, []);
 
-  const fetchModels = useCallback(async (provider: Provider): Promise<string[]> => {
-    const ids = await requestModels(provider, undefined);
-    void logLine(`models: ${provider.baseURL} ${ids.length}`);
-    if (provider.id !== "") {
-      dispatch({ type: "models", providerId: provider.id, models: ids });
-    }
+  const selectInstance = useCallback((id: string) => {
+    dispatch({ type: "instanceSelect", id });
+  }, []);
+
+  const addModel = useCallback((instanceId: string, model: ModelConfig) => {
+    dispatch({ type: "modelAdd", instanceId, model });
+  }, []);
+
+  const updateModel = useCallback((instanceId: string, model: ModelConfig) => {
+    dispatch({ type: "modelUpdate", instanceId, model });
+  }, []);
+
+  const removeModel = useCallback((instanceId: string, modelId: string) => {
+    dispatch({ type: "modelRemove", instanceId, modelId });
+  }, []);
+
+  const selectModel = useCallback((modelId: string) => {
+    dispatch({ type: "modelSelect", modelId });
+  }, []);
+
+  const fetchModels = useCallback(async (instance: Instance): Promise<string[]> => {
+    const ids = await requestModels(instance, undefined);
+    void logLine(`models: ${instance.baseURL} ${ids.length}`);
     return ids;
   }, []);
 
@@ -383,39 +406,49 @@ export function useChat(): UseChat {
       selectAgent,
       addAgent,
       removeAgent,
-      saveProvider,
-      removeProvider,
-      selectProvider,
+      addInstance,
+      updateInstance,
+      removeInstance,
+      selectInstance,
+      addModel,
+      updateModel,
+      removeModel,
+      selectModel,
       fetchModels,
     }),
     [
       addAgent,
+      addInstance,
+      addModel,
       deleteSession,
+      fetchModels,
       newChat,
       openSession,
       removeAgent,
-      removeProvider,
+      removeInstance,
+      removeModel,
       renameSession,
-      saveProvider,
-      fetchModels,
       selectAgent,
-      selectProvider,
+      selectInstance,
+      selectModel,
       send,
       setDraft,
       setSheetOpen,
+      updateInstance,
+      updateModel,
       stop,
     ],
   );
 
   const messages = useMemo(() => messagesOf(state), [state]);
-  const provider = useMemo(() => providerOf(state), [state]);
+  const endpoint = useMemo(() => endpointOf(state), [state]);
 
   return {
     state,
     messages,
     streaming: state.turn !== null,
-    modelLabel: modelNameOf(provider),
-    provider,
+    modelLabel: modelNameOf(endpoint?.model ?? null),
+    endpoint,
     actions,
   };
 }
