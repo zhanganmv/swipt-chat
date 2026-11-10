@@ -45,10 +45,13 @@ export async function runTurn(
         throw new ChatFailure({ kind: "empty", detail: "响应没有 body" });
       }
       assertStreamNotEmpty(
-        await readDeltas(response.body, onDelta, instance.protocol),
+        await readDeltas(response.body, onDelta, instance.protocol, signal),
       );
     } else {
-      onDelta(completionOf(await response.text(), instance.protocol));
+      const text = await response.text();
+      if (!signal.aborted) {
+        onDelta(completionOf(text, instance.protocol));
+      }
     }
   } catch (thrown) {
     await logLine(

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
 import { AppState } from "react-native";
 
-import { describeFailure, normalizeFailure } from "../api/errors.ts";
+import { describeFailure, normalizeFailure, technicalOf } from "../api/errors.ts";
 import { requestModels } from "../api/request.ts";
 import { runTurn } from "../api/turn.ts";
 import {
@@ -388,9 +388,14 @@ export function useChat(): UseChat {
   }, []);
 
   const fetchModels = useCallback(async (instance: Instance): Promise<string[]> => {
-    const ids = await requestModels(instance, undefined);
-    void logLine(`models: ${instance.baseURL} ${ids.length}`);
-    return ids;
+    try {
+      const ids = await requestModels(instance, undefined);
+      void logLine(`models: ${instance.baseURL} ${ids.length}`);
+      return ids;
+    } catch (error) {
+      void logLine(`models: failed ${technicalOf(error)}`);
+      throw error;
+    }
   }, []);
 
   const actions = useMemo<ChatActions>(

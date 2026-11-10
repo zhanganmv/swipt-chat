@@ -61,6 +61,18 @@ export function describeFailure(error: ChatError): string {
   }
 }
 
+/** One line for the debug log: the class, the message, and the first frame. */
+export function technicalOf(thrown: unknown): string {
+  if (!(thrown instanceof Error)) {
+    return String(thrown);
+  }
+  const frame = (thrown.stack ?? "")
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => line.includes("app.js"));
+  return `${thrown.name}: ${thrown.message}${frame === undefined ? "" : ` (${frame})`}`;
+}
+
 function truncate(text: string, limit = 160): string {
   const flat = text.replace(/\s+/g, " ").trim();
   return flat.length > limit ? `${flat.slice(0, limit)}…` : flat;

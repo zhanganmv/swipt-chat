@@ -14,16 +14,31 @@ export async function readDeltas(
   body: ReadableStream<Uint8Array>,
   onDelta: (delta: string) => void,
   protocol: Protocol,
+  signal?: AbortSignal,
 ): Promise<number> {
   const reader = body.getReader();
   const decoder = new UTF8Decoder();
   let buffer = "";
   let received = 0;
+  let aborted = false;
+  // Stopping cannot recall the request, but it can stop reading the reply:
+  // cancelling the reader tells the host to release the native stream.
+  const cancel = () => {
+    aborted = true;
+    void reader.cancel().catch(() => {});
+  };
+  if (signal !== undefined) {
+    if (signal.aborted) {
+      cancel();
+    } else {
+      signal.addEventListener("abort", cancel);
+    }
+  }
 
   try {
-    while (true) {
+    while (!aborted) {
       const chunk = await reader.read();
-      if (chunk.done) {
+      if (chunk.done || aborted) {
         break;
       }
       if (chunk.value === undefined) {
@@ -50,6 +65,9 @@ export async function readDeltas(
     }
     return received;
   } finally {
+    if (signal !== undefined) {
+      signal.removeEventListener("abort", cancel);
+    }
     await reader.cancel().catch(() => {});
   }
 }
