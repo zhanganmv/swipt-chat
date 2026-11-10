@@ -81,6 +81,29 @@ class Deadline {
 
 type Response = Awaited<ReturnType<Client["fetch"]>>;
 
+/**
+ * One GET/POST, retried once when the connection dies with no response.
+ *
+ * `EOF` from the host means the server closed the socket before answering —
+ * usually a flaky edge rather than a wrong request, and the retry is free
+ * because nothing was written yet. Only idempotent calls are retried.
+ */
+async function attempt(
+  client: Client,
+  url: string,
+  init: RequestInit,
+): Promise<Response> {
+  try {
+    return await client.fetch(url, init);
+  } catch (thrown) {
+    const message = thrown instanceof Error ? thrown.message : String(thrown);
+    if (init.method !== "GET" || !message.includes("EOF")) {
+      throw thrown;
+    }
+    return client.fetch(url, init);
+  }
+}
+
 async function call(
   url: string,
   init: RequestInit,
@@ -106,7 +129,7 @@ async function call(
     }
     stage = "发送请求";
     const response = await Promise.race([
-      client.fetch(url, init),
+      attempt(client, url, init),
       deadline.expires,
     ]);
     stage = "读取响应";
@@ -180,22 +203,41 @@ export async function requestModels(
  * "is this Base URL right". Any HTTP status counts as reachable — 401 from the
  * endpoint still proves the round trip happened.
  */
-export async function networkSelfTest(): Promise<string> {
+const PROBE_URLS = [
+  "https://api.openai.com/v1/models",
+  "https://api.deepseek.com/v1/models",
+  "https://api.moonshot.cn/v1/models",
+] as const;
+
+async function probeOne(url: string): Promise<string> {
   const deadline = new Deadline(15000, undefined);
   try {
     const response = await call(
-      "https://api.openai.com/v1/models",
+      url,
       { method: "GET", headers: { authorization: "Bearer test" } },
       deadline,
     );
-    return `网络可用：HTTP ${response.status}`;
+    return `网络可用（HTTP ${response.status}）`;
   } catch (thrown) {
     if (thrown instanceof ChatFailure) {
       if (thrown.info.kind === "http") {
-        return `网络可用：服务器返回 HTTP ${thrown.info.status ?? "?"}`;
+        return `网络可用（HTTP ${thrown.info.status ?? "?"}）`;
       }
-      return `网络不可用：${thrown.info.detail}`;
+      return `失败（${thrown.info.detail}）`;
     }
-    return `网络不可用：${String(thrown)}`;
+    return `失败（${String(thrown)}）`;
   }
+}
+
+/**
+ * Probes several hosts so a single tap shows whether the host network is
+ * broken everywhere or only on the path to one provider.
+ */
+export async function networkSelfTest(): Promise<string> {
+  const lines: string[] = [];
+  for (const url of PROBE_URLS) {
+    const host = url.replace(/^https:\/\//u, "").split("/")[0];
+    lines.push(`${host}: ${await probeOne(url)}`);
+  }
+  return lines.join("\n");
 }

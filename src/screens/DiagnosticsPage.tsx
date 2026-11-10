@@ -63,7 +63,7 @@ export const DiagnosticsPage = memo(function DiagnosticsPage({
         <Section
           title="网络自检"
           footer={
-            <Footer text="向 api.openai.com 发一个不带有效 Key 的请求：只要拿到 HTTP 状态码，就说明宿主的网络通道是通的。" />
+            <Footer text="依次向 api.openai.com、api.deepseek.com、api.moonshot.cn 发一个不带有效 Key 的请求：只要拿到 HTTP 状态码，就说明到那台服务器的通道是通的；三台全失败说明宿主网络不通。" />
           }
         >
           <Button
