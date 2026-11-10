@@ -34,6 +34,7 @@ import {
 } from "@expo/ui/swift-ui/modifiers";
 
 import { useTheme } from "../theme/index.tsx";
+import { useSheetLifecycle } from "./useSheetLifecycle.ts";
 
 export type SessionRow = {
   id: string;
@@ -78,6 +79,7 @@ export function SessionListSheet({
   onDelete: (id: string) => void;
 }) {
   const { colors } = useTheme();
+  const { mounted, finish } = useSheetLifecycle(visible);
 
   // The search field binds to a native observable; `onChange` mirrors what was
   // typed into RN state so the rows we hand to the list can be filtered.
@@ -92,6 +94,10 @@ export function SessionListSheet({
     return sessions.filter((item) => item.title.toLowerCase().includes(needle));
   }, [sessions, text]);
 
+  if (!mounted) {
+    return null;
+  }
+
   return (
     <View pointerEvents="box-none" style={styles.anchor}>
       <Host style={styles.host}>
@@ -99,6 +105,7 @@ export function SessionListSheet({
           isPresented={visible}
           onIsPresentedChange={(next) => {
             if (!next) {
+              finish();
               onClose();
             }
           }}

@@ -7,6 +7,8 @@ import {
   presentationDragIndicator,
 } from "@expo/ui/swift-ui/modifiers";
 
+import { useSheetLifecycle } from "./useSheetLifecycle.ts";
+
 /**
  * The one way this app presents a sheet.
  *
@@ -26,6 +28,12 @@ export function SheetShell({
   onClose: () => void;
   children: ReactNode;
 }) {
+  const { mounted, finish } = useSheetLifecycle(visible);
+
+  if (!mounted) {
+    return null;
+  }
+
   return (
     <View pointerEvents="box-none" style={styles.anchor}>
       <Host style={styles.host}>
@@ -33,6 +41,7 @@ export function SheetShell({
           isPresented={visible}
           onIsPresentedChange={(next) => {
             if (!next) {
+              finish();
               onClose();
             }
           }}

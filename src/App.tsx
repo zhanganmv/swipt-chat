@@ -52,10 +52,14 @@ function Shell() {
   // list, and one more entry for each capability page below it.
   const [path, setPath] = useState<string[]>([]);
 
-  // `null` = closed; `provider: null` = adding a new service.
+  // `providerForm` is what the sheet is editing; `providerOpen` is whether it is
+  // on screen. They are separate on purpose: clearing the record on close would
+  // re-key the form to "new" and blank every field while the sheet is still
+  // sliding away.
   const [providerForm, setProviderForm] = useState<{ provider: Provider | null } | null>(
     null,
   );
+  const [providerOpen, setProviderOpen] = useState(false);
   const [agentForm, setAgentForm] = useState(false);
   const [agentPicker, setAgentPicker] = useState(false);
 
@@ -89,16 +93,19 @@ function Shell() {
     setPath([]);
   }, [actions]);
 
-  const addProvider = useCallback(() => setProviderForm({ provider: null }), []);
-  const editProvider = useCallback(
-    (provider: Provider) => setProviderForm({ provider }),
-    [],
-  );
-  const closeProviderForm = useCallback(() => setProviderForm(null), []);
+  const addProvider = useCallback(() => {
+    setProviderForm({ provider: null });
+    setProviderOpen(true);
+  }, []);
+  const editProvider = useCallback((provider: Provider) => {
+    setProviderForm({ provider });
+    setProviderOpen(true);
+  }, []);
+  const closeProviderForm = useCallback(() => setProviderOpen(false), []);
   const saveProvider = useCallback(
     (next: Provider) => {
       actions.saveProvider(next);
-      setProviderForm(null);
+      setProviderOpen(false);
     },
     [actions],
   );
@@ -194,41 +201,40 @@ function Shell() {
       </Host>
 
       {/* The drawers present themselves, so they stay outside the navigation
-          stack: a sheet on top of the chat is not a page. */}
-      {state.sheetOpen ? (
-        <SessionListSheet
-          visible
-          sessions={sessionRows}
-          currentId={state.currentId}
-          onClose={closeSessions}
-          onOpen={actions.openSession}
-          onRename={actions.renameSession}
-          onDelete={actions.deleteSession}
-        />
-      ) : null}
+          stack: a sheet on top of the chat is not a page. They are mounted
+          unconditionally and decide that themselves — a sheet has to stay
+          mounted while it slides away, which is why closing used to look like it
+          vanished (`useSheetLifecycle`). */}
+      <SessionListSheet
+        visible={state.sheetOpen}
+        sessions={sessionRows}
+        currentId={state.currentId}
+        onClose={closeSessions}
+        onOpen={actions.openSession}
+        onRename={actions.renameSession}
+        onDelete={actions.deleteSession}
+      />
 
-      {providerForm !== null ? (
-        <ProviderSheet
-          visible
-          provider={providerForm.provider}
-          onClose={closeProviderForm}
-          onSave={saveProvider}
-        />
-      ) : null}
+      <ProviderSheet
+        visible={providerOpen}
+        provider={providerForm?.provider ?? null}
+        onClose={closeProviderForm}
+        onSave={saveProvider}
+      />
 
-      {agentForm ? (
-        <AgentSheet visible onClose={closeAgentForm} onSave={saveAgent} />
-      ) : null}
+      <AgentSheet
+        visible={agentForm}
+        onClose={closeAgentForm}
+        onSave={saveAgent}
+      />
 
-      {agentPicker ? (
-        <AgentPickerSheet
-          visible
-          agents={state.agents}
-          currentId={state.agentId}
-          onClose={closeAgents}
-          onSelect={pickAgent}
-        />
-      ) : null}
+      <AgentPickerSheet
+        visible={agentPicker}
+        agents={state.agents}
+        currentId={state.agentId}
+        onClose={closeAgents}
+        onSelect={pickAgent}
+      />
     </View>
   );
 }

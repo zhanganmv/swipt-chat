@@ -30,6 +30,7 @@ import {
 } from "@expo/ui/swift-ui/modifiers";
 
 import { useTheme } from "../theme/index.tsx";
+import { useSheetLifecycle } from "./useSheetLifecycle.ts";
 
 export type AgentRow = { id: string; title: string };
 
@@ -58,6 +59,11 @@ export function AgentPickerSheet({
   onSelect: (id: string) => void;
 }) {
   const { colors } = useTheme();
+  const { mounted, finish } = useSheetLifecycle(visible);
+
+  if (!mounted) {
+    return null;
+  }
 
   return (
     <View pointerEvents="box-none" style={styles.anchor}>
@@ -66,6 +72,7 @@ export function AgentPickerSheet({
           isPresented={visible}
           onIsPresentedChange={(next) => {
             if (!next) {
+              finish();
               onClose();
             }
           }}
