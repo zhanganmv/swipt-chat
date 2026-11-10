@@ -10,7 +10,6 @@ import {
   Text,
   TextInput,
   View,
-  type HostInstance,
   type KeyboardEvent,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
@@ -65,59 +64,54 @@ export const ChatScreen = memo(function ChatScreen({
 }) {
   const { colors, type } = useTheme();
   const list = useRef<FlatList<Message>>(null);
-  const composer = useRef<HostInstance | null>(null);
-  const restBottom = useRef(0);
-  const overlap = useRef(0);
+  const root = useRef<Measurable | null>(null);
+  const rootBottom = useRef(0);
   const [keyboard, setKeyboard] = useState(0);
   const [atBottom, setAtBottom] = useState(true);
 
-  // Track the composer's resting screen-Y so the keyboard inset can be the real
-  // overlap instead of the raw keyboard height (there is no KeyboardAvoidingView
-  // in the swiplet runtime that behaves correctly with the safe area).
-  const measureComposer = useCallback(() => {
-    if (overlap.current !== 0) {
-      return;
-    }
-    composer.current?.measureInWindow((_x, y, _width, height) => {
-      if (overlap.current === 0 && height > 0) {
-        restBottom.current = y + height;
+  // Where this view's bottom sits on screen. The keyboard frame arrives in
+  // screen coordinates, so the inset is "screen bottom - keyboard top": the
+  // input row then ends exactly on the keyboard, whatever the safe area or the
+  // hosting SwiftUI view did around us.
+  //
+  // Measured on the root, not on the composer: the root's frame is fixed, while
+  // the composer moves by the very inset being computed. Measuring it once is
+  // enough — `paddingBottom` changes the layout inside this view, not its frame.
+  const setRoot = useCallback((node: unknown) => {
+    root.current = (node as Measurable | null) ?? null;
+  }, []);
+
+  const measureRoot = useCallback(() => {
+    root.current?.measureInWindow((_x, y, _width, height) => {
+      if (height > 0) {
+        rootBottom.current = y + height;
       }
     });
   }, []);
 
   useEffect(() => {
-    measureComposer();
     const onFrame = (event: KeyboardEvent) => {
-      const anchor = restBottom.current;
-      const covered =
+      const anchor = rootBottom.current;
+      const next =
         anchor > 0
           ? anchor - event.endCoordinates.screenY
           : event.endCoordinates.height;
-      const next = Math.max(0, Math.round(covered));
-      overlap.current = next;
-      setKeyboard(next);
+      setKeyboard(Math.max(0, Math.round(next)));
     };
-    const onShow = () => measureComposer();
     const onHide = () => {
-      overlap.current = 0;
       setKeyboard(0);
-      setTimeout(measureComposer, 80);
+      setTimeout(measureRoot, 80);
     };
-    const shown = Keyboard.addListener(
-      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow",
-      onShow,
-    );
+    const frame = Keyboard.addListener("keyboardWillChangeFrame", onFrame);
     const hidden = Keyboard.addListener(
       Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide",
       onHide,
     );
-    const frame = Keyboard.addListener("keyboardWillChangeFrame", onFrame);
     return () => {
-      shown.remove();
-      hidden.remove();
       frame.remove();
+      hidden.remove();
     };
-  }, [measureComposer]);
+  }, [measureRoot]);
 
   const scrollToEnd = useCallback((animated = true) => {
     requestAnimationFrame(() =>
@@ -140,6 +134,8 @@ export const ChatScreen = memo(function ChatScreen({
 
   return (
     <View
+      ref={setRoot}
+      onLayout={measureRoot}
       style={[
         styles.root,
         { backgroundColor: colors.background, paddingBottom: keyboard },
@@ -178,7 +174,7 @@ export const ChatScreen = memo(function ChatScreen({
         {atBottom ? null : <JumpToBottom onPress={() => scrollToEnd()} />}
       </View>
 
-      <View ref={composer} style={styles.composerWrap} onLayout={measureComposer}>
+      <View style={styles.composerWrap}>
         <View
           style={[
             styles.composer,
@@ -217,6 +213,11 @@ export const ChatScreen = memo(function ChatScreen({
     </View>
   );
 });
+
+/** The one method we need from a measured view; RN 0.88's public types drop it. */
+type Measurable = {
+  measureInWindow: (cb: (x: number, y: number, width: number, height: number) => void) => void;
+};
 
 function MessageRow({ message }: { message: Message }) {
   const { colors, type } = useTheme();
