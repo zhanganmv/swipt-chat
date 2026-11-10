@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
+import { AppState } from "react-native";
 
 import { describeFailure, normalizeFailure } from "../api/errors.ts";
 import { runTurn } from "../api/turn.ts";
@@ -13,25 +14,21 @@ import { newId } from "../domain/ids.ts";
 import { modelNameOf, titleOf } from "../domain/provider.ts";
 import type { Agent, Message, Provider } from "../domain/types.ts";
 import { logLine } from "../log.ts";
-import { deviceFiles } from "./deviceFiles.ts";
-import {
-  loadAgents,
-  loadChat,
-  loadDraft,
-  loadProviders,
-  saveAgents,
-  saveChat,
-  saveDraft,
-  saveProviders,
-} from "./storage.ts";
+import { openDeviceStore } from "./deviceSql.ts";
+import type { Snapshot, Store } from "./store.ts";
+import { diffState } from "./sync.ts";
 
 /** Seeded on first launch; after that the list lives in `agents.json`. */
 const DEFAULT_AGENTS: Agent[] = [{ id: "default", title: "Swipt Chat" }];
 
 /** Tokens are coalesced: one React update per window, not one per token. */
 const FLUSH_MS = 50;
-/** History is written after the user stops typing/streaming, not per change. */
-const SAVE_MS = 400;
+/**
+ * Writes are batched: 300ms after the last change, and immediately when the app
+ * leaves the foreground. The plan's floor is 300ms; a shorter window would put
+ * a write inside every few streaming frames.
+ */
+const SAVE_MS = 300;
 
 export interface ChatActions {
   send(): void;
@@ -80,6 +77,14 @@ export function useChat(): UseChat {
   const turn = useRef<{ conversationId: string; messageId: string } | null>(null);
   const controller = useRef<AbortController | null>(null);
 
+  /** Opened once at launch; `null` when SQLite is unavailable (in-memory run). */
+  const store = useRef<Store | null>(null);
+  /** The state the store knows about: the diff base for the next flush. */
+  const persisted = useRef<ChatState | null>(null);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Flushes are strictly ordered; a failed one retries from the same base. */
+  const writes = useRef<Promise<void>>(Promise.resolve());
+
   const flush = useCallback(() => {
     if (timer.current !== null) {
       clearTimeout(timer.current);
@@ -117,24 +122,29 @@ export function useChat(): UseChat {
   useEffect(() => {
     let alive = true;
     void (async () => {
-      const [chat, providers, agents, draft] = await Promise.all([
-        loadChat(deviceFiles),
-        loadProviders(deviceFiles),
-        loadAgents(deviceFiles),
-        loadDraft(deviceFiles),
-      ]);
+      let opened: Store | null = null;
+      let snapshot: Snapshot | null = null;
+      try {
+        opened = await openDeviceStore();
+        snapshot = await opened.load();
+      } catch (thrown: unknown) {
+        // The chat still works for this run; only history is lost.
+        void logLine(`storage: ${String(thrown)}`);
+      }
       if (!alive) {
+        void opened?.close();
         return;
       }
+      store.current = opened;
       dispatch({
         type: "hydrate",
-        conversations: chat.conversations,
-        currentId: chat.currentId,
-        draft,
-        providers: providers.providers,
-        providerId: providers.activeId,
-        agents: agents.agents,
-        agentId: agents.activeId,
+        conversations: snapshot?.conversations ?? [],
+        currentId: snapshot?.currentId ?? null,
+        draft: snapshot?.draft ?? "",
+        providers: snapshot?.providers ?? [],
+        providerId: snapshot?.providerId ?? null,
+        agents: snapshot?.agents ?? [],
+        agentId: snapshot?.agentId ?? null,
       });
     })();
     return () => {
@@ -142,58 +152,62 @@ export function useChat(): UseChat {
     };
   }, []);
 
-  useEffect(() => {
-    if (!state.hydrated) {
+  const flushNow = useCallback(() => {
+    if (saveTimer.current !== null) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    const target = store.current;
+    const base = persisted.current;
+    const next = stateRef.current;
+    if (target === null || base === null || !next.hydrated) {
       return;
     }
-    const pending = setTimeout(() => {
-      void saveChat(deviceFiles, {
-        conversations: state.conversations,
-        currentId: state.currentId,
-      }).catch((thrown: unknown) => logLine(`persist: chat ${String(thrown)}`));
-    }, SAVE_MS);
-    return () => clearTimeout(pending);
-  }, [state.conversations, state.currentId, state.hydrated]);
+    const ops = diffState(base, next);
+    if (ops.length === 0) {
+      return;
+    }
+    persisted.current = next;
+    writes.current = writes.current
+      .then(() => target.apply(ops))
+      .catch((thrown: unknown) => {
+        // Keep the old base: the next flush retries the same ops. Every op is
+        // an idempotent upsert or delete, so a retry cannot duplicate rows.
+        persisted.current = base;
+        return logLine(`persist: ${String(thrown)}`);
+      });
+  }, []);
 
   useEffect(() => {
     if (!state.hydrated) {
       return;
     }
-    const pending = setTimeout(() => {
-      void saveDraft(deviceFiles, state.draft).catch((thrown: unknown) =>
-        logLine(`persist: draft ${String(thrown)}`),
-      );
-    }, SAVE_MS);
-    return () => clearTimeout(pending);
-  }, [state.draft, state.hydrated]);
-
-  useEffect(() => {
-    if (!state.hydrated) {
+    if (persisted.current === null) {
+      persisted.current = state;
       return;
     }
-    const pending = setTimeout(() => {
-      void saveProviders(deviceFiles, {
-        providers: state.providers,
-        activeId: state.providerId,
-      }).catch((thrown: unknown) =>
-        logLine(`persist: providers ${String(thrown)}`),
-      );
-    }, SAVE_MS);
-    return () => clearTimeout(pending);
-  }, [state.providers, state.providerId, state.hydrated]);
-
-  useEffect(() => {
-    if (!state.hydrated) {
-      return;
+    if (saveTimer.current !== null) {
+      clearTimeout(saveTimer.current);
     }
-    const pending = setTimeout(() => {
-      void saveAgents(deviceFiles, {
-        agents: state.agents,
-        activeId: state.agentId,
-      }).catch((thrown: unknown) => logLine(`persist: agents ${String(thrown)}`));
-    }, SAVE_MS);
-    return () => clearTimeout(pending);
-  }, [state.agents, state.agentId, state.hydrated]);
+    saveTimer.current = setTimeout(flushNow, SAVE_MS);
+    return () => {
+      if (saveTimer.current !== null) {
+        clearTimeout(saveTimer.current);
+        saveTimer.current = null;
+      }
+    };
+  }, [state, flushNow]);
+
+  // Backgrounding is the last moment a write is guaranteed to run: the process
+  // may be killed while suspended, and the debounce timer would never fire.
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (status) => {
+      if (status !== "active") {
+        flushNow();
+      }
+    });
+    return () => subscription.remove();
+  }, [flushNow]);
 
   useEffect(
     () => () => {
@@ -201,8 +215,9 @@ export function useChat(): UseChat {
       if (timer.current !== null) {
         clearTimeout(timer.current);
       }
+      flushNow();
     },
-    [],
+    [flushNow],
   );
 
   const send = useCallback(() => {

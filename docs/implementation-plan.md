@@ -8,7 +8,7 @@
 
 ---
 
-## 0. 当前实现状态（2026-11-10，v27）
+## 0. 当前实现状态（2026-11-10，v28）
 
 > 引用规则：**UI 口径**以 `ui-spec.md` 的「当前基线」为准，**架构现状**以 `architecture.md` 为准；本文 §4 的「service + SQLite + pi」是目标形态，不是现状。
 
@@ -17,11 +17,11 @@
 - **外壳与呈现**：一个原生 `NavigationStack`（Chat 作根），设置是它的 `NavigationDestination`；会话列表 / 智能体选择 / 模型服务表单 / 新建智能体四个底部抽屉；顶栏原生模糊 + 液态玻璃控件。
 - **模型服务**：多个 OpenAI 兼容服务可增删改，列表 + 抽屉表单 + 当前项切换；API Key 单独存 `secrets.json`。
 - **智能体**：列表 + 新建 + 切换（`agents.json`）。
-- **会话**：新建/切换/重命名/删除，草稿独立落盘，杀进程可恢复（`conversations.json` / `draft.json`）。
+- **会话**：新建/切换/重命名/删除，草稿独立落盘，杀进程可恢复（SQLite `swipt-chat.db`，v28 起；旧的 JSON 文件不再读写）。
 - **对话链路**：`src/api/turn.ts` 直接调 `/chat/completions`，流式（SSE）与非流式都通；没有 provider 时走 `src/dev/mock.ts` 本地 Mock。错误按 kind 分类并内联到消息。
-- **质量基线**：`tsc` 干净、`npm test` 88 条断言、`npm run build` 通过；bundle 依赖固定 7 项，全在运行时白名单内。
+- **质量基线**：`tsc` 干净、`npm test` 93 条断言、`npm run build` 通过；bundle 依赖 8 项（v28 起多一个 `expo-sqlite`），全在运行时白名单内。
 
-还没做（本文的重点，按 P1 起排）：SQLite、`pi` 循环、extension service 常驻、内置工具 / MCP / Skills 的真实数据层、会话搜索（FTS5）、模型目录与连通性探测。
+还没做（本文的重点，按 P1 起排）：`pi` 循环、extension service 常驻、内置工具 / MCP / Skills 的真实数据层、会话搜索（FTS5 已探测、搜索 UI 未做）、模型目录与连通性探测。
 
 ---
 
@@ -360,16 +360,18 @@ CREATE TABLE app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 
 ### P1 基座与模型服务（3 人日 ≈ 24 Agent 小时）
 
+> **状态（2026-11-10，v28）**：① 存储换 SQLite 已完成（`schema.ts` / `store.ts` / `sync.ts` / `deviceSql.ts`，迁移阶梯、事务、后台 flush、FTS5 探测、中断回复修复都有断言）；② 模型目录、③ 连通性探测落库还没做。
+
 **做什么**
-- SQLite 打开 + 迁移框架 + 6 张表（provider/model/agent/session/message/app_state）。
-- 设置页 Provider 列表（新增/编辑/删除/启用）**已在 P0 阶段用 JSON 落地**（v17–v27），P1 只把存储换成 SQLite；剩下的是**模型目录**（预置目录自动带出，自定义手填 model id 或从 `/v1/models` 拉）与 API Key 的处理（不做加密，但不明文回显）。
-- 连通性探测（复用现有「网络自检」），结果落日志。
-- 会话写库用**流式节流**（≥300ms 或 chunk 边界），退出/切后台强制 flush。
+- **已完成（v28）**：SQLite 打开 + `PRAGMA user_version` 迁移阶梯 + `provider` / `provider_secret` / `agent` / `session` / `message` / `app_state` 六张表；`model` 表随 ② 模型目录以 v2 迁移加入。
+- 设置页 Provider 列表（新增/编辑/删除/启用）已在 P0 用 JSON 落地（v17–v27），v28 起底层是 SQLite；P1 剩下的是**模型目录**（预置目录自动带出，自定义手填 model id 或从 `/v1/models` 拉）与 API Key 的处理（不做加密，但不明文回显）。
+- 连通性探测（复用现有「网络自检」），结果落日志（P1 ③ 起同时落库）。
+- **已完成（v28）**：会话写库按 diff 出最小变更集，300ms 防抖 + 单事务提交，切后台/卸载强制 flush（细节见 `architecture.md` §5）。
 
 **验收**
 - `npm run check` + `npm test` 绿；真机：新建 DeepSeek Provider → 拉模型列表 → 选模型 → 发一条消息流式出字；杀进程重开，数据仍在。
 
-**风险**：sqlite 桥是否支持 `PRAGMA journal_mode=WAL`、事务回滚 —— 需真机验证，不支持就降级单写队列。
+**风险**：sqlite 桥对 `PRAGMA journal_mode=WAL` 与事务的支持 —— 代码已按「失败即降级」写（WAL 被拒就忽略，事务走 `withTransactionAsync`，写库串行排队），真机确认一次即可。
 
 ### P2 pi Agent 循环（service 常驻，6 人日 ≈ 48 Agent 小时）
 

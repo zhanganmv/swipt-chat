@@ -23,21 +23,19 @@ import {
   headersOf,
 } from "../src/api/openai.ts";
 import {
-  decodeAgents,
-  decodeChat,
-  decodeProviders,
-  encodeChat,
-  loadAgents,
-  loadChat,
-  loadDraft,
-  loadProviders,
-  saveAgents,
-  saveChat,
-  saveDraft,
-  saveProviders,
-  type Driver,
-  type StoredChat,
-} from "../src/state/storage.ts";
+  SCHEMA_VERSION,
+  detectFts5,
+  migrate,
+} from "../src/state/schema.ts";
+import type { SqlDriver } from "../src/state/sql.ts";
+import {
+  applyOps,
+  emptySnapshot,
+  loadSnapshot,
+  type Snapshot,
+  type StoreOp,
+} from "../src/state/store.ts";
+import { diffState } from "../src/state/sync.ts";
 
 let failed = 0;
 
@@ -397,22 +395,53 @@ check(
   "aborted",
 );
 
-// ------------------------------------------------------------------- storage
-const memory = (): Driver & { files: Map<string, string> } => {
-  const files = new Map<string, string>();
+// ------------------------------------------------------------------ database
+// The storage layer is exercised against a real SQLite engine (`node:sqlite`,
+// same SQL dialect as the device bridge) instead of a JSON fake, so migrations,
+// joins and cascades are tested as written.
+const sqlite = async (): Promise<SqlDriver> => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const db = new DatabaseSync(":memory:");
+  db.exec("PRAGMA foreign_keys = ON");
   return {
-    files,
-    read: async (name) => files.get(name) ?? null,
-    write: async (name, text) => {
-      files.set(name, text);
+    exec: async (sql) => {
+      db.exec(sql);
     },
-    remove: async (name) => {
-      files.delete(name);
+    run: async (sql, params = []) => {
+      db.prepare(sql).run(...(params as never[]));
+    },
+    all: async <T>(sql: string, params: readonly unknown[] = []) =>
+      db.prepare(sql).all(...(params as never[])) as T[],
+    first: async <T>(sql: string, params: readonly unknown[] = []) =>
+      (db.prepare(sql).get(...(params as never[])) ?? null) as T | null,
+    transaction: async (task) => {
+      db.exec("BEGIN");
+      try {
+        await task();
+        db.exec("COMMIT");
+      } catch (thrown) {
+        db.exec("ROLLBACK");
+        throw thrown;
+      }
     },
   };
 };
 
-const chat: StoredChat = {
+const db = await sqlite();
+check("db: migration lands the schema version", await migrate(db), SCHEMA_VERSION);
+check("db: migration is idempotent", await migrate(db), SCHEMA_VERSION);
+check("db: a fresh database is empty", await loadSnapshot(db), emptySnapshot());
+check("db: fts5 probe answers", typeof (await detectFts5(db)), "boolean");
+check(
+  "db: fts5 probe leaves no table behind",
+  (await db.first<{ n: number }>(
+    "SELECT count(*) AS n FROM sqlite_master WHERE name = 'fts5_probe'",
+  ))?.n,
+  0,
+);
+
+const chat: ChatState = {
+  hydrated: true,
   conversations: [
     {
       id: "c1",
@@ -425,147 +454,156 @@ const chat: StoredChat = {
     },
   ],
   currentId: "c1",
+  draft: "草稿",
+  providers: [provider],
+  providerId: "p1",
+  agents: [{ id: "default", title: "Swipt Chat" }],
+  agentId: "default",
+  turn: null,
+  sheetOpen: false,
 };
-check("storage: round-trip", decodeChat(encodeChat(chat)), chat);
-check("storage: junk is empty", decodeChat("{"), {
-  conversations: [],
-  currentId: null,
-});
-check("storage: null is empty", decodeChat(null), {
-  conversations: [],
-  currentId: null,
-});
+
+const seed: StoreOp[] = [
+  { kind: "session", id: "c1", title: "对话", updatedAt: 5 },
+  { kind: "message", sessionId: "c1", seq: 0, message: chat.conversations[0].messages[0] },
+  { kind: "message", sessionId: "c1", seq: 1, message: chat.conversations[0].messages[1] },
+  { kind: "provider", provider },
+  { kind: "agent", agent: { id: "default", title: "Swipt Chat" } },
+  { kind: "state", key: "current_session", value: "c1" },
+  { kind: "state", key: "active_provider", value: "p1" },
+  { kind: "state", key: "active_agent", value: "default" },
+  { kind: "state", key: "draft", value: "草稿" },
+];
+await applyOps(db, seed);
+check("db: round-trip through rows", await loadSnapshot(db), {
+  conversations: chat.conversations,
+  currentId: "c1",
+  draft: "草稿",
+  providers: [provider],
+  providerId: "p1",
+  agents: chat.agents,
+  agentId: "default",
+} satisfies Snapshot);
+
 check(
-  "storage: drops malformed records",
-  decodeChat(
-    JSON.stringify({
-      conversations: [
-        {
-          id: "c1",
-          title: "t",
-          messages: [{ nope: true }, { id: "m", content: "x" }],
-        },
-        { title: "no id" },
-        "junk",
-      ],
-      currentId: "missing",
-    }),
+  "db: api key is not a column of provider",
+  (await db.all<{ name: string }>("PRAGMA table_info(provider)")).some(
+    (column) => column.name === "api_key",
   ),
-  {
-    conversations: [
-      {
-        id: "c1",
-        title: "t",
-        updatedAt: 0,
-        messages: [{ id: "m", role: "user", content: "x", status: "done" }],
-      },
-    ],
-    currentId: null,
-  },
+  false,
 );
 check(
-  "storage: interrupted empty reply becomes an error",
-  decodeChat(
-    JSON.stringify({
-      conversations: [
-        {
-          id: "c1",
-          messages: [
-            { id: "a1", role: "assistant", content: "", status: "streaming" },
-          ],
-        },
+  "db: api key lives in its own table",
+  (await db.first<{ api_key: string }>(
+    "SELECT api_key FROM provider_secret WHERE provider_id = ?",
+    ["p1"],
+  ))?.api_key,
+  "sk-1",
+);
+
+// The whole point of the rewrite: a streamed token changes exactly one row.
+const streamedChat: ChatState = {
+  ...chat,
+  conversations: [
+    {
+      ...chat.conversations[0],
+      updatedAt: 6,
+      messages: [
+        chat.conversations[0].messages[0],
+        { id: "a1", role: "assistant", content: "hello there", status: "streaming" },
       ],
-      currentId: "c1",
-    }),
-  ).conversations[0].messages[0],
+    },
+  ],
+};
+const tokenOps = diffState(chat, streamedChat);
+check(
+  "sync: one token touches one message and one session row",
+  tokenOps.map((op) => op.kind),
+  ["session", "message"],
+);
+check("sync: unchanged state produces no writes", diffState(chat, chat), []);
+check(
+  "sync: delete is expressed as a delete",
+  diffState(chat, { ...chat, conversations: [] }).map((op) => op.kind),
+  ["session.delete"],
+);
+await applyOps(db, tokenOps);
+check(
+  "db: streamed content replaces the row instead of appending",
+  (await loadSnapshot(db)).conversations[0].messages[1].content,
+  "hello there",
+);
+check(
+  "db: a part-streamed reply reloads as done",
+  (await loadSnapshot(db)).conversations[0].messages[1].status,
+  "done",
+);
+
+await applyOps(db, [
   {
-    id: "a1",
+    kind: "message",
+    sessionId: "c1",
+    seq: 2,
+    message: {
+      id: "a2",
+      role: "assistant",
+      content: "",
+      status: "streaming",
+    },
+  },
+]);
+check(
+  "db: an empty interrupted reply becomes an error",
+  (await loadSnapshot(db)).conversations[0].messages[2],
+  {
+    id: "a2",
     role: "assistant",
     content: "",
     status: "error",
     error: "生成已中断",
   },
 );
-check(
-  "storage: interrupted partial reply becomes done",
-  decodeChat(
-    JSON.stringify({
-      conversations: [
-        {
-          id: "c1",
-          messages: [
-            { id: "a1", role: "assistant", content: "半", status: "streaming" },
-          ],
-        },
-      ],
-    }),
-  ).conversations[0].messages[0].status,
-  "done",
-);
 
-const files = memory();
-await saveChat(files, chat);
-check("storage: chat written", (await loadChat(files)).conversations.length, 1);
-await saveProviders(files, { providers: [provider], activeId: "p1" });
 check(
-  "storage: api key kept out of providers.json",
-  files.files.get("providers.json")?.includes("sk-1"),
-  false,
+  "db: stale current session is dropped",
+  await applyOps(db, [{ kind: "state", key: "current_session", value: "gone" }]),
+  undefined,
+);
+check("db: stale current session falls back", (await loadSnapshot(db)).currentId, null);
+
+check(
+  "db: stale active provider falls back to the first service",
+  (await applyOps(db, [
+    { kind: "state", key: "active_provider", value: "gone" },
+  ])),
+  undefined,
 );
 check(
-  "storage: api key stored separately",
-  files.files.get("secrets.json")?.includes("sk-1"),
-  true,
-);
-check(
-  "storage: provider reloaded with its key",
-  (await loadProviders(files)).providers[0]?.apiKey,
-  "sk-1",
-);
-check(
-  "storage: active provider restored",
-  (await loadProviders(files)).activeId,
+  "db: active provider fallback",
+  (await loadSnapshot(db)).providerId,
   "p1",
 );
+
+await applyOps(db, [{ kind: "session.delete", id: "c1" }]);
 check(
-  "storage: record without id is dropped",
-  decodeProviders(
-    JSON.stringify({ providers: [{ baseURL: "https://b/v1", model: "x" }] }),
-    null,
-  ).providers.length,
+  "db: deleting a session drops its messages",
+  (await db.first<{ n: number }>("SELECT count(*) AS n FROM message"))?.n,
   0,
 );
 check(
-  "storage: stale activeId falls back to the first service",
-  decodeProviders(
-    JSON.stringify({
-      providers: [
-        { id: "a", baseURL: "https://a/v1", model: "m" },
-        { id: "b", baseURL: "https://b/v1", model: "m" },
-      ],
-      activeId: "gone",
-    }),
-    null,
-  ).activeId,
-  "a",
+  "db: draft is not history",
+  (await loadSnapshot(db)).draft,
+  "草稿",
 );
-await saveAgents(files, {
-  agents: [{ id: "a1", title: "助手" }],
-  activeId: "a1",
-});
+
+await applyOps(db, [{ kind: "provider.delete", id: "p1" }]);
 check(
-  "storage: agents round-trip",
-  (await loadAgents(files)).agents[0]?.title,
-  "助手",
-);
-check(
-  "storage: malformed agent is dropped",
-  decodeAgents(JSON.stringify({ agents: [{ title: "no id" }] })).agents.length,
+  "db: deleting a provider drops its key",
+  (await db.first<{ n: number }>(
+    "SELECT count(*) AS n FROM provider_secret",
+  ))?.n,
   0,
 );
-await saveDraft(files, "草稿");
-check("storage: draft round-trip", await loadDraft(files), "草稿");
-check("storage: missing draft is empty", await loadDraft(memory()), "");
 
 if (failed > 0) {
   process.exit(1);
