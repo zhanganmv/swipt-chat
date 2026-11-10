@@ -171,3 +171,31 @@ export async function requestModels(
   );
   return modelIdsOf(await response.text());
 }
+
+/**
+ * Reachability check for the diagnostics page.
+ *
+ * Deliberately independent of the user's instance: it answers "can this build
+ * of Swipt send an HTTP request at all", which is a different question from
+ * "is this Base URL right". Any HTTP status counts as reachable — 401 from the
+ * endpoint still proves the round trip happened.
+ */
+export async function networkSelfTest(): Promise<string> {
+  const deadline = new Deadline(15000, undefined);
+  try {
+    const response = await call(
+      "https://api.openai.com/v1/models",
+      { method: "GET", headers: { authorization: "Bearer test" } },
+      deadline,
+    );
+    return `网络可用：HTTP ${response.status}`;
+  } catch (thrown) {
+    if (thrown instanceof ChatFailure) {
+      if (thrown.info.kind === "http") {
+        return `网络可用：服务器返回 HTTP ${thrown.info.status ?? "?"}`;
+      }
+      return `网络不可用：${thrown.info.detail}`;
+    }
+    return `网络不可用：${String(thrown)}`;
+  }
+}

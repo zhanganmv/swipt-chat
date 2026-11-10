@@ -40,6 +40,7 @@ import type { ChatActions } from "../state/useChat.ts";
 import { useTheme } from "../theme/index.tsx";
 import { InstancePage } from "./InstancePage.tsx";
 import { ModelPage } from "./ModelPage.tsx";
+import { DiagnosticsPage } from "./DiagnosticsPage.tsx";
 import { ModelServiceHome } from "./ModelServiceHome.tsx";
 
 /**
@@ -71,6 +72,7 @@ export const SettingsPages = memo(function SettingsPages({
   onAddAgent,
   onDeleteAgent,
   onSelectAgent,
+  onSelfTest,
 }: {
   instances: readonly Instance[];
   models: Record<string, ModelConfig[]>;
@@ -83,6 +85,7 @@ export const SettingsPages = memo(function SettingsPages({
   onAddAgent: () => void;
   onDeleteAgent: (id: string) => void;
   onSelectAgent: (id: string) => void;
+  onSelfTest: () => Promise<string>;
 }) {
   const { colors } = useTheme();
 
@@ -119,6 +122,11 @@ export const SettingsPages = memo(function SettingsPages({
                 <Row value="tools" title="工具" icon="wrench.and.screwdriver" />
                 <Row value="mcp" title="MCP 服务" icon="shippingbox" />
                 <Row value="skills" title="技能" icon="sparkles" />
+                <Row
+                  value="diagnostics"
+                  title="诊断日志"
+                  icon="doc.text.magnifyingglass"
+                />
               </Section>
             </List>
           </Toolbar>
@@ -253,6 +261,10 @@ export const SettingsPages = memo(function SettingsPages({
               note="技能是带 SKILL.md 的目录，支持 URL 导入与粘贴导入，随 P5 批次接入"
               batch="P5"
             />
+          </NavigationDestination>
+
+          <NavigationDestination value="diagnostics">
+            <DiagnosticsPage onSelfTest={onSelfTest} />
           </NavigationDestination>
     </>
   );

@@ -21,7 +21,11 @@ import { AgentSheet } from "./shell/AgentSheet.tsx";
 import { InstanceSheet } from "./shell/InstanceSheet.tsx";
 import { SessionListSheet, type SessionRow } from "./shell/SessionListSheet.tsx";
 import { useChat } from "./state/useChat.ts";
+import { installErrorCapture } from "./log.ts";
 import { ThemeProvider, useTheme } from "./theme/index.tsx";
+
+// One-time: uncaught errors go to the in-memory log the diagnostics page reads.
+installErrorCapture();
 
 export default function App() {
   return (
@@ -194,6 +198,7 @@ function Shell() {
             onAddAgent={addAgent}
             onDeleteAgent={actions.removeAgent}
             onSelectAgent={actions.selectAgent}
+            onSelfTest={actions.selfTest}
           />
         </NavigationStack>
       </Host>

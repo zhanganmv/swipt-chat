@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
 import { AppState } from "react-native";
 
 import { describeFailure, normalizeFailure, technicalOf } from "../api/errors.ts";
-import { requestModels } from "../api/request.ts";
+import { networkSelfTest, requestModels } from "../api/request.ts";
 import { runTurn } from "../api/turn.ts";
 import {
   endpointOf,
@@ -59,6 +59,8 @@ export interface ChatActions {
    * persisted — the caller decides which candidates the user adds.
    */
   fetchModels(instance: Instance): Promise<string[]>;
+  /** Reachability check with no instance involved; never throws. */
+  selfTest(): Promise<string>;
 }
 
 export interface UseChat {
@@ -401,6 +403,12 @@ export function useChat(): UseChat {
     }
   }, []);
 
+  const selfTest = useCallback(async (): Promise<string> => {
+    const result = await networkSelfTest();
+    void logLine(`selfTest: ${result}`);
+    return result;
+  }, []);
+
   const actions = useMemo<ChatActions>(
     () => ({
       send,
@@ -423,6 +431,7 @@ export function useChat(): UseChat {
       removeModel,
       selectModel,
       fetchModels,
+      selfTest,
     }),
     [
       addAgent,
@@ -439,6 +448,7 @@ export function useChat(): UseChat {
       selectAgent,
       selectInstance,
       selectModel,
+      selfTest,
       send,
       setDraft,
       setSheetOpen,
