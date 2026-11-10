@@ -8,7 +8,6 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  useWindowDimensions,
   View,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
@@ -19,7 +18,6 @@ import { useTheme } from "../theme/index.tsx";
 import { messageMetrics, radius } from "../theme/tokens.ts";
 import { ChatHeader } from "../shell/ChatHeader.tsx";
 import { ComposerToolbar, JumpToBottom } from "../shell/ComposerToolbar.tsx";
-import { useSafeAreaInsets } from "../shell/SafeArea.tsx";
 
 const STICK_THRESHOLD = 80;
 /** Height of the floating glass toolbar; the transcript starts below it. */
@@ -65,16 +63,6 @@ export const ChatScreen = memo(function ChatScreen({
   const { colors, type } = useTheme();
   const list = useRef<FlatList<Message>>(null);
   const [atBottom, setAtBottom] = useState(true);
-  const [composerHeight, setComposerHeight] = useState(0);
-  const [surfaceHeight, setSurfaceHeight] = useState(0);
-  const windowHeight = useWindowDimensions().height;
-  const { insets, setSurface, overlay, measure } = useSafeAreaInsets();
-
-  // The native stack shrinks this surface when the keyboard opens, so a
-  // shorter-than-window surface means the keyboard (which already covers the
-  // home indicator) is up; the bottom inset must then be dropped.
-  const keyboardUp = surfaceHeight > 0 && surfaceHeight < windowHeight - 40;
-  const bottomInset = keyboardUp ? 0 : insets.bottom;
   const scrollToEnd = useCallback((animated = true) => {
     requestAnimationFrame(() =>
       list.current?.scrollToEnd({ animated }),
@@ -95,28 +83,20 @@ export const ChatScreen = memo(function ChatScreen({
   }, []);
 
   return (
-    <View
-      ref={setSurface}
-      onLayout={(event) => {
-        setSurfaceHeight(event.nativeEvent.layout.height);
-        measure();
-      }}
-      style={[styles.root, { backgroundColor: colors.background }]}
-    >
-      <FlatList
-        ref={list}
-        style={styles.list}
-        contentContainerStyle={[
-          styles.listContent,
-          {
-            // The transcript runs the full height of the screen; the toolbar and
-            // the composer are painted on top of it, so the scroll area only
-            // reserves room for them instead of being boxed in by them.
-            paddingTop: insets.top + HEADER_HEIGHT + 8,
-            paddingBottom: composerHeight + bottomInset + 12,
-          },
-          messages.length === 0 ? styles.listContentEmpty : null,
-        ]}
+    <View style={[styles.root, { backgroundColor: colors.background }]}>
+      <View style={styles.listWrap}>
+        <FlatList
+          ref={list}
+          style={styles.list}
+          contentContainerStyle={[
+            styles.listContent,
+            // Only the toolbar floats over the transcript; the composer is a
+            // sibling below it, so the list is shortened by layout, not by a
+            // padding number we would have to keep in sync with the composer's
+            // height.
+            { paddingTop: HEADER_HEIGHT + 8 },
+            messages.length === 0 ? styles.listContentEmpty : null,
+          ]}
           data={messages}
           keyExtractor={(item) => item.id}
           onScroll={onScroll}
@@ -127,12 +107,12 @@ export const ChatScreen = memo(function ChatScreen({
           ListEmptyComponent={
             <EmptyState modelLabel={modelLabel} onPick={onOpenModelSettings} />
           }
-      />
+        />
 
-      <View
-        pointerEvents="box-none"
-        style={[styles.headerWrap, { paddingTop: insets.top }]}
-      >
+        {atBottom ? null : <JumpToBottom bottom={12} onPress={() => scrollToEnd()} />}
+      </View>
+
+      <View pointerEvents="box-none" style={styles.headerWrap}>
         <ChatHeader
           agentId={agentId}
           agents={agents}
@@ -143,17 +123,7 @@ export const ChatScreen = memo(function ChatScreen({
         />
       </View>
 
-      {atBottom ? null : (
-        <JumpToBottom
-          bottom={composerHeight + bottomInset + 12}
-          onPress={() => scrollToEnd()}
-        />
-      )}
-
-      <View
-        style={[styles.composerWrap, { paddingBottom: bottomInset + 8 }]}
-        onLayout={(event) => setComposerHeight(event.nativeEvent.layout.height)}
-      >
+      <View style={styles.composerWrap}>
         <View
           style={[
             styles.composer,
@@ -190,7 +160,6 @@ export const ChatScreen = memo(function ChatScreen({
         </View>
       </View>
 
-      {overlay}
     </View>
   );
 });
@@ -331,6 +300,7 @@ function EmptyState({
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
+  listWrap: { flex: 1 },
   headerWrap: { position: "absolute", left: 0, right: 0, top: 0 },
   list: { flex: 1 },
   listContent: {
@@ -348,13 +318,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.bubble,
   },
   assistantRow: { width: "100%", gap: 8 },
-  composerWrap: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    paddingHorizontal: 12,
-  },
+  composerWrap: { paddingHorizontal: 12, paddingBottom: 8 },
   composer: {
     borderRadius: 32,
     padding: 12,
