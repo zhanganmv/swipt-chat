@@ -2,7 +2,12 @@ import { memo } from "react";
 import { Button } from "@expo/ui/swift-ui";
 import { exit } from "@swipt/api/swiplet";
 
-import { GlassButton, GlassChipMenu, GlassMenu } from "./GlassControls.tsx";
+import {
+  GlassButton,
+  GlassButtonGroup,
+  GlassChipMenu,
+  GlassMenu,
+} from "./GlassControls.tsx";
 import { GlassToolbar } from "./GlassToolbar.tsx";
 
 /**
@@ -62,16 +67,25 @@ export const ChatHeader = memo(function ChatHeader({
         </GlassChipMenu>,
       ]}
       trailing={[
-        <GlassButton
-          key="new"
-          systemImage="square.and.pencil"
-          label="新增会话"
-          onPress={onNewChat}
-        />,
-        <GlassMenu key="more" systemImage="ellipsis" label="更多">
-          <Button label="会话列表" systemImage="list.bullet" onPress={onOpenSessions} />
-          <Button label="设置" systemImage="gearshape" onPress={onOpenSettings} />
-        </GlassMenu>,
+        // One capsule for both icons, as in the Cherry reference: the pair reads
+        // as a single control group rather than two floating circles.
+        <GlassButtonGroup key="actions">
+          <GlassButton
+            systemImage="square.and.pencil"
+            label="新增会话"
+            onPress={onNewChat}
+            plain
+            compact
+          />
+          <GlassMenu systemImage="ellipsis" label="更多" plain compact>
+            <Button
+              label="会话列表"
+              systemImage="list.bullet"
+              onPress={onOpenSessions}
+            />
+            <Button label="设置" systemImage="gearshape" onPress={onOpenSettings} />
+          </GlassMenu>
+        </GlassButtonGroup>,
       ]}
     />
   );

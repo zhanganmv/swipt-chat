@@ -15,26 +15,33 @@ import {
   truncationMode,
 } from "@expo/ui/swift-ui/modifiers";
 
+import { useTheme } from "../theme/index.tsx";
+
 /**
  * The controls the glass toolbar is built from.
  *
- * Sizing rule: the *label* carries the 40×40 frame and the `contentShape`, not
- * the outer `Button`/`Menu`. SwiftUI puts the tap gesture on the label view, so
- * a frame and content shape applied outside it only enlarged what was drawn —
- * the only tappable part stayed the 17pt glyph in the middle. That is exactly
- * the "轻点没反应、要长按" report (v17).
+ * Two rules, both learned the hard way:
  *
- * Glass rule: `interactive: true` was removed back in v14 — interactive glass
- * installs its own press gesture on top of the button and delays the action.
- * The plain visual variant has no gesture, so the button keeps a normal tap.
+ * Sizing — the *label* carries the frame, the `contentShape` and the glass.
+ * SwiftUI puts the tap gesture on the label view, so a frame and content shape
+ * applied outside it only enlarged what was drawn while the only tappable part
+ * stayed the 17pt glyph ("轻点没反应、要长按", v17). Keeping the glass on the
+ * label also means every control's drawn bounds *are* its layout bounds, so a
+ * 40pt circle and a 40pt capsule line up on the same centre line (v18: the chip
+ * was aligned by the Menu, whose own metrics differ from a Button's).
+ *
+ * Glass — `interactive: true` was removed in v14: interactive glass installs its
+ * own press gesture on top of the button and delays the action. The plain visual
+ * variant has no gesture, so the button keeps a normal tap.
  */
 export const GLASS_CONTROL_SIZE = 40;
+/** Copy the chat toolbar's glyph size so a nav-bar arrow matches it exactly. */
+export const GLASS_ICON_SIZE = 17;
 /** Wide enough for a readable name, narrow enough to leave room for the icons. */
 export const AGENT_CHIP_MAX_WIDTH = 150;
 
-type GlassShapeProps = {
-  disabled?: boolean;
-};
+const glassCircle = glassEffect({ glass: { variant: "regular" }, shape: "circle" });
+const glassCapsule = glassEffect({ glass: { variant: "regular" }, shape: "capsule" });
 
 export function GlassButton({
   systemImage,
@@ -42,29 +49,37 @@ export function GlassButton({
   onPress,
   disabled: isDisabled,
   tint,
-}: GlassShapeProps & {
+  plain = false,
+  compact = false,
+}: {
   systemImage: SFSymbol;
   label: string;
   onPress: () => void;
+  disabled?: boolean;
   tint?: string;
+  /** Draw no glass: use inside `GlassButtonGroup`, which owns the capsule. */
+  plain?: boolean;
+  /** 36×40 instead of 40×40, for two icons side by side in one capsule. */
+  compact?: boolean;
 }) {
+  const width = compact ? 36 : GLASS_CONTROL_SIZE;
   return (
     <Button
       onPress={onPress}
       modifiers={[
         buttonStyle("plain"),
-        glassEffect({ glass: { variant: "regular" }, shape: "circle" }),
         disabled(isDisabled ?? false),
         accessibilityLabel(label),
       ]}
     >
       <Image
         systemName={systemImage}
-        size={17}
+        size={GLASS_ICON_SIZE}
         color={tint}
         modifiers={[
-          frame({ width: GLASS_CONTROL_SIZE, height: GLASS_CONTROL_SIZE }),
+          frame({ width, height: GLASS_CONTROL_SIZE }),
           contentShape(shapes.circle()),
+          ...(plain ? [] : [glassCircle]),
         ]}
       />
     </Button>
@@ -76,31 +91,56 @@ export function GlassMenu({
   systemImage,
   label,
   children,
-}: GlassShapeProps & {
+  plain = false,
+  compact = false,
+}: {
   systemImage: SFSymbol;
   label: string;
   children: ReactNode;
+  plain?: boolean;
+  compact?: boolean;
 }) {
+  const width = compact ? 36 : GLASS_CONTROL_SIZE;
   return (
     <Menu
       label={
         <Image
           systemName={systemImage}
-          size={17}
+          size={GLASS_ICON_SIZE}
           modifiers={[
-            frame({ width: GLASS_CONTROL_SIZE, height: GLASS_CONTROL_SIZE }),
+            frame({ width, height: GLASS_CONTROL_SIZE }),
             contentShape(shapes.circle()),
+            ...(plain ? [] : [glassCircle]),
           ]}
         />
       }
-      modifiers={[
-        buttonStyle("plain"),
-        glassEffect({ glass: { variant: "regular" }, shape: "circle" }),
-        accessibilityLabel(label),
-      ]}
+      modifiers={[buttonStyle("plain"), accessibilityLabel(label)]}
     >
       {children}
     </Menu>
+  );
+}
+
+/**
+ * Two icons share one capsule ("新建会话和更多应放在一个按钮组").
+ *
+ * The capsule is drawn by this `HStack`, which is not a button, so it installs
+ * no gesture; each child keeps its own 36×40 hit area.
+ */
+export function GlassButtonGroup({ children }: { children: ReactNode }) {
+  return (
+    <HStack
+      spacing={2}
+      alignment="center"
+      modifiers={[
+        padding({ horizontal: 4 }),
+        frame({ height: GLASS_CONTROL_SIZE }),
+        contentShape(shapes.capsule()),
+        glassCapsule,
+      ]}
+    >
+      {children}
+    </HStack>
   );
 }
 
@@ -124,18 +164,26 @@ export function GlassChipMenu({
   children: ReactNode;
   maxWidth?: number;
 }) {
+  const { colors } = useTheme();
   return (
     <Menu
       label={
         <HStack
           spacing={6}
+          alignment="center"
           modifiers={[
             padding({ horizontal: 12 }),
             frame({ height: GLASS_CONTROL_SIZE }),
             contentShape(shapes.capsule()),
+            glassCapsule,
           ]}
         >
-          <Image systemName={systemImage} size={15} />
+          <Image
+            systemName={systemImage}
+            size={13}
+            color={colors["muted-foreground"]}
+            modifiers={[frame({ width: 20, height: 20 })]}
+          />
           <Text
             modifiers={[
               font({ size: 15 }),
@@ -148,13 +196,39 @@ export function GlassChipMenu({
           </Text>
         </HStack>
       }
-      modifiers={[
-        buttonStyle("plain"),
-        glassEffect({ glass: { variant: "regular" }, shape: "capsule" }),
-        accessibilityLabel(label),
-      ]}
+      modifiers={[buttonStyle("plain"), accessibilityLabel(label)]}
     >
       {children}
     </Menu>
+  );
+}
+
+/**
+ * A navigation-bar back button: same glyph size as the chat toolbar, no glass
+ * of its own — the navigation bar already provides the liquid-glass layer, and
+ * stacking a second one is what made the settings back button look doubled (v13).
+ * Text was dropped in v18 ("去掉设置返回按钮的文字"): an arrow carries the meaning.
+ */
+export function NavBackButton({
+  label,
+  onPress,
+}: {
+  label: string;
+  onPress: () => void;
+}) {
+  return (
+    <Button
+      onPress={onPress}
+      modifiers={[buttonStyle("plain"), accessibilityLabel(label)]}
+    >
+      <Image
+        systemName="chevron.left"
+        size={GLASS_ICON_SIZE}
+        modifiers={[
+          frame({ width: 36, height: 36 }),
+          contentShape(shapes.circle()),
+        ]}
+      />
+    </Button>
   );
 }

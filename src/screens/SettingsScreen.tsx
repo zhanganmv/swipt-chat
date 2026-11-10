@@ -24,7 +24,6 @@ import {
   font,
   foregroundStyle,
   frame,
-  labelStyle,
   listStyle,
   navigationBarTitleDisplayMode,
   navigationTitle,
@@ -33,6 +32,7 @@ import {
 } from "@expo/ui/swift-ui/modifiers";
 
 import { providerNameOf } from "../domain/provider.ts";
+import { NavBackButton } from "../shell/GlassControls.tsx";
 import type { Agent, Provider } from "../domain/types.ts";
 import { useTheme } from "../theme/index.tsx";
 
@@ -62,6 +62,8 @@ export const SettingsScreen = memo(function SettingsScreen({
   onAddAgent,
   onDeleteAgent,
   onSelectAgent,
+  path,
+  onPathChange,
 }: {
   providers: Provider[];
   agents: Agent[];
@@ -76,16 +78,16 @@ export const SettingsScreen = memo(function SettingsScreen({
   onAddAgent: () => void;
   onDeleteAgent: (id: string) => void;
   onSelectAgent: (id: string) => void;
+  /** Native navigation path, owned by the shell so it knows the depth. */
+  path: string[];
+  onPathChange: (next: string[]) => void;
 }) {
   const { colors } = useTheme();
-
-  // Navigation is driven from JS so a sheet can pop back to its list.
-  const [path, setPath] = useState<string[]>([]);
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <Host style={{ flex: 1 }}>
-        <NavigationStack path={path} onPathChange={setPath}>
+        <NavigationStack path={path} onPathChange={onPathChange}>
           <Toolbar>
             <List
               modifiers={[
@@ -120,12 +122,7 @@ export const SettingsScreen = memo(function SettingsScreen({
             </List>
             <Toolbar.Content>
               <ToolbarItem placement="topBarLeading">
-                <Button
-                  label="返回"
-                  systemImage="chevron.left"
-                  onPress={onBack}
-                  modifiers={[buttonStyle("plain"), labelStyle("titleAndIcon")]}
-                />
+                <NavBackButton label="返回聊天" onPress={onBack} />
               </ToolbarItem>
             </Toolbar.Content>
           </Toolbar>

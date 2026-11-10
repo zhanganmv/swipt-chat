@@ -87,14 +87,23 @@ function CircleButton({
       onPress={onPress}
       modifiers={[
         buttonStyle("plain"),
-        frame({ width: ACTION, height: ACTION }),
-        contentShape(shapes.circle()),
-        background(fill, shapes.circle()),
         disabled(isDisabled ?? false),
         accessibilityLabel(label),
       ]}
     >
-      <Image systemName={systemImage} size={glyphSize} color={tint} />
+      {/* Size, hit area and fill live on the label: SwiftUI hit-tests the label,
+          so a frame applied to the Button only enlarged the painted circle and
+          left the 17pt glyph as the only tappable spot. */}
+      <Image
+        systemName={systemImage}
+        size={glyphSize}
+        color={tint}
+        modifiers={[
+          frame({ width: ACTION, height: ACTION }),
+          contentShape(shapes.circle()),
+          background(fill, shapes.circle()),
+        ]}
+      />
     </Button>
   );
 }
@@ -138,14 +147,18 @@ export const ComposerToolbar = memo(function ComposerToolbar({
             onPress={onOpenModelSettings}
             modifiers={[
               buttonStyle("plain"),
-              padding({ horizontal: 10 }),
-              frame({ height: PILL_HEIGHT }),
-              contentShape(shapes.capsule()),
-              background(chip, shapes.capsule()),
               accessibilityLabel(`模型：${modelLabel}`),
             ]}
           >
-            <HStack spacing={6}>
+            <HStack
+              spacing={6}
+              modifiers={[
+                padding({ horizontal: 10 }),
+                frame({ height: PILL_HEIGHT }),
+                contentShape(shapes.capsule()),
+                background(chip, shapes.capsule()),
+              ]}
+            >
               <Text
                 modifiers={[
                   font({ size: 13 }),
@@ -211,13 +224,19 @@ export function JumpToBottom({ onPress }: { onPress: () => void }) {
           onPress={onPress}
           modifiers={[
             buttonStyle("plain"),
-            frame({ width: 36, height: 36 }),
-            contentShape(shapes.circle()),
             glassEffect({ glass: { variant: "regular" }, shape: "circle" }),
             accessibilityLabel("回到底部"),
           ]}
         >
-          <Image systemName="chevron.down" size={15} color={colors.foreground} />
+          <Image
+            systemName="chevron.down"
+            size={15}
+            color={colors.foreground}
+            modifiers={[
+              frame({ width: 36, height: 36 }),
+              contentShape(shapes.circle()),
+            ]}
+          />
         </Button>
       </Host>
     </View>

@@ -10,10 +10,10 @@ import { useTheme } from "../theme/index.tsx";
  *
  * One component for both the chat header and the settings header, so the two
  * cannot drift apart: same 48pt height, same 12pt side padding, same 10pt gap,
- * same `controlSize("large")` for the glass buttons. The caller only supplies
- * the SwiftUI items — every one of them must be a `Button` (a `Menu` renders
- * at a different height, which is what made 更多 look taller than its
- * neighbours).
+ * same `controlSize("large")` for the glass buttons, and the same `center`
+ * alignment. The caller only supplies the SwiftUI items, and every one of them
+ * pins its own size on its label (see `GlassControls`), so a 40pt circle and a
+ * 40pt capsule share one centre line.
  */
 export function GlassToolbar({
   leading,
@@ -31,6 +31,7 @@ export function GlassToolbar({
       <Host style={{ flex: 1 }} matchContents={{ vertical: true }}>
         <HStack
           spacing={10}
+          alignment="center"
           modifiers={[padding({ horizontal: 12, vertical: 4 }), controlSize("large")]}
         >
           {leading}

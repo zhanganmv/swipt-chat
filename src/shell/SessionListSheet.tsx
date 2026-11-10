@@ -103,10 +103,16 @@ export function SessionListSheet({
             }
           }}
           presentationBackground={
-            // `thin` instead of `regular`: regular read as an opaque grey panel
-            // over a dark chat, which is what "背景是黑灰色的" was describing.
+            // A bare `Rectangle` is filled with the primary foreground colour —
+            // black in light mode. That, not the material, is why the drawer read
+            // as "黑灰色": the material was painted *behind* an opaque black
+            // rectangle. Now the fill itself is a light translucent white over an
+            // ultra-thin material, i.e. white liquid glass.
             <Rectangle
-              modifiers={[background({ type: "material", material: "thin" })]}
+              modifiers={[
+                background({ type: "material", material: "ultraThin" }),
+                foregroundStyle("#FFFFFF66"),
+              ]}
             />
           }
         >
