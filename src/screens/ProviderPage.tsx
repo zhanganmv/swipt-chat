@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Alert } from "react-native";
 import {
   Button,
@@ -25,8 +25,10 @@ import {
   disabled,
   font,
   foregroundStyle,
+  frame,
   keyboardType,
   listStyle,
+  multilineTextAlignment,
   navigationBarTitleDisplayMode,
   navigationTitle,
   tag,
@@ -152,7 +154,6 @@ export function ProviderPage({
           ]}
         >
           <Section
-            title="连接"
             footer={
               <Footer
                 text={
@@ -163,19 +164,56 @@ export function ProviderPage({
               />
             }
           >
-            <TextField
-              text={nameText}
-              placeholder="连接名称"
-              onTextChange={(next) => {
-                setName(next);
-                patch({ name: next });
-              }}
+            <LabeledField label="名称">
+              <TextField
+                text={nameText}
+                placeholder="未命名"
+                onTextChange={(next) => {
+                  setName(next);
+                  patch({ name: next });
+                }}
+                modifiers={[multilineTextAlignment("trailing")]}
+              />
+            </LabeledField>
+            <LabeledField label="Base URL">
+              <TextField
+                text={baseText}
+                placeholder="https://…"
+                onTextChange={(next) => {
+                  setBaseURL(next);
+                  patch({ baseURL: next });
+                }}
+                modifiers={[
+                  keyboardType("url"),
+                  textInputAutocapitalization("never"),
+                  autocorrectionDisabled(),
+                  multilineTextAlignment("trailing"),
+                ]}
+              />
+            </LabeledField>
+            <LabeledField label="API Key">
+              <SecureField
+                text={keyText}
+                placeholder={keyReady ? "已保存" : "未填写"}
+                onTextChange={(next) => patch({ apiKey: next })}
+                modifiers={[
+                  textInputAutocapitalization("never"),
+                  autocorrectionDisabled(),
+                  multilineTextAlignment("trailing"),
+                ]}
+              />
+            </LabeledField>
+            {urlError === null ? null : <FieldError text={urlError} />}
+            <Toggle
+              label="流式输出"
+              isOn={provider.stream}
+              onIsOnChange={(stream) => patch({ stream })}
             />
-            <Text
-              modifiers={[font({ size: 15 }), foregroundStyle(colors["muted-foreground"])]}
-            >
-              模板：{template?.name ?? "未知模板"}
-            </Text>
+          </Section>
+
+          {/* 标识：模板 / 协议 / ID 都是只读信息，单独成段，不混在可编辑字段里。 */}
+          <Section title="标识">
+            <InfoRow label="模板" value={template?.name ?? "未知模板"} />
             {protocolEditable(templates, provider) ? (
               <Picker
                 label="协议"
@@ -189,35 +227,9 @@ export function ProviderPage({
                 ))}
               </Picker>
             ) : (
-              <Text
-                modifiers={[
-                  font({ size: 15 }),
-                  foregroundStyle(colors["muted-foreground"]),
-                ]}
-              >
-                协议：{PROTOCOL_LABEL[provider.protocol]}
-              </Text>
+              <InfoRow label="协议" value={PROTOCOL_LABEL[provider.protocol]} />
             )}
-            <TextField
-              text={baseText}
-              placeholder="Base URL"
-              onTextChange={(next) => {
-                setBaseURL(next);
-                patch({ baseURL: next });
-              }}
-              modifiers={[
-                keyboardType("url"),
-                textInputAutocapitalization("never"),
-                autocorrectionDisabled(),
-              ]}
-            />
-            <SecureField
-              text={keyText}
-              placeholder={keyReady ? "API Key 已保存（输入可替换）" : "API Key"}
-              onTextChange={(next) => patch({ apiKey: next })}
-              modifiers={[textInputAutocapitalization("never"), autocorrectionDisabled()]}
-            />
-            {urlError === null ? null : <FieldError text={urlError} />}
+            <InfoRow label="ID" value={provider.id} />
             {!custom &&
             template !== undefined &&
             provider.baseURL !== template.baseURL &&
@@ -240,100 +252,85 @@ export function ProviderPage({
                 }
               />
             ) : null}
-            <Toggle
-              label="流式输出"
-              isOn={provider.stream}
-              onIsOnChange={(stream) => patch({ stream })}
-            />
-            <Text
-              modifiers={[
-                font({ size: 12 }),
-                foregroundStyle(colors["muted-foreground"]),
-              ]}
-            >
-              ID: {provider.id}
-            </Text>
           </Section>
 
-          <Section title="模型">
+          <Section
+            title="模型"
+            footer={
+              models.length === 0 ? (
+                <Footer text="还没有模型。可从目录拉取，或手动添加。" />
+              ) : (
+                <Footer text={modelCountLabel(models.length)} />
+              )
+            }
+          >
             {models.length === 0 ? (
-              <>
-                <Muted text="未添加模型" />
-                {custom ? null : fetchRow(fetching, keyReady, urlError, fetchModels, () =>
-                  Alert.alert("请先填写 API Key", "获取模型目录需要有效的 Key。"),
-                )}
-                <Button
-                  label="手动添加模型"
-                  modifiers={[buttonStyle("plain")]}
-                  onPress={() => setModelOpen(true)}
-                />
-              </>
+              <Text modifiers={[font({ size: 17 }), foregroundStyle(colors["muted-foreground"])]}>
+                未添加模型
+              </Text>
             ) : (
-              <>
-                {models.map((model) => (
-                  <SwipeActions key={model.id}>
-                    <NavigationLink value={providerModelRoute(provider.id, model.id)}>
-                      <VStack alignment="leading" spacing={2}>
-                        <Text modifiers={[font({ size: 16 })]}>{model.displayName}</Text>
-                        <Text
-                          modifiers={[
-                            font({ size: 12 }),
-                            foregroundStyle(colors["muted-foreground"]),
-                          ]}
-                        >
-                          {model.id}
-                        </Text>
-                      </VStack>
-                    </NavigationLink>
-                    <SwipeActions.Actions edge="trailing">
-                      <Button
-                        label="删除"
-                        role="destructive"
-                        onPress={() =>
-                          Alert.alert(
-                            `删除模型「${model.displayName}」？`,
-                            "此操作不可恢复。",
-                            [
-                              { text: "取消", style: "cancel" },
-                              {
-                                text: "删除",
-                                style: "destructive",
-                                onPress: () => onDeleteModel(provider.id, model.id),
-                              },
-                            ],
-                          )
-                        }
-                      />
-                    </SwipeActions.Actions>
-                  </SwipeActions>
-                ))}
-                <Text
-                  modifiers={[
-                    font({ size: 13 }),
-                    foregroundStyle(colors["muted-foreground"]),
-                  ]}
-                >
-                  {modelCountLabel(models.length)}
-                </Text>
-                {custom ? null : fetchRow(fetching, keyReady, urlError, fetchModels, () =>
+              models.map((model) => (
+                <SwipeActions key={model.id}>
+                  <NavigationLink value={providerModelRoute(provider.id, model.id)}>
+                    <HStack spacing={12}>
+                      <Text modifiers={[font({ size: 17 })]}>{model.displayName}</Text>
+                      <Spacer />
+                      <Text
+                        modifiers={[
+                          font({ size: 15 }),
+                          foregroundStyle(colors["muted-foreground"]),
+                        ]}
+                      >
+                        {model.id}
+                      </Text>
+                    </HStack>
+                  </NavigationLink>
+                  <SwipeActions.Actions edge="trailing">
+                    <Button
+                      label="删除"
+                      role="destructive"
+                      onPress={() =>
+                        Alert.alert(
+                          `删除模型「${model.displayName}」？`,
+                          "此操作不可恢复。",
+                          [
+                            { text: "取消", style: "cancel" },
+                            {
+                              text: "删除",
+                              style: "destructive",
+                              onPress: () => onDeleteModel(provider.id, model.id),
+                            },
+                          ],
+                        )
+                      }
+                    />
+                  </SwipeActions.Actions>
+                </SwipeActions>
+              ))
+            )}
+          </Section>
+
+          {/* 操作独立成段：系统设置里「添加/获取」这类动作从不夹在内容行之间。 */}
+          <Section>
+            {custom
+              ? null
+              : fetchRow(fetching, keyReady, urlError, fetchModels, () =>
                   Alert.alert("请先填写 API Key", "获取模型目录需要有效的 Key。"),
                 )}
-                <Button
-                  label="手动添加模型"
-                  modifiers={[buttonStyle("plain")]}
-                  onPress={() => setModelOpen(true)}
-                />
-              </>
-            )}
+            <Button
+              label="手动添加模型"
+              modifiers={[buttonStyle("plain")]}
+              onPress={() => setModelOpen(true)}
+            />
           </Section>
 
           <HeaderSection provider={provider} onUpdate={onUpdate} />
 
-          <Section title="危险操作">
+          <Section>
             <Button
               label="删除此连接"
               role="destructive"
-              modifiers={[buttonStyle("plain")]}
+              modifiers={[buttonStyle("plain"), frame({ maxWidth: 10000 })]}
               onPress={() =>
                 Alert.alert(
                   `删除「${provider.name}」？`,
@@ -415,11 +412,7 @@ function HeaderSection({
   provider: ModelProvider;
   onUpdate: (provider: ModelProvider) => void;
 }) {
-  const [name, setName] = useState("");
-  const [value, setValue] = useState("");
-  const nameText = useNativeState("");
-  const valueText = useNativeState("");
-
+  const { colors } = useTheme();
   const patchHeaders = (headers: RequestHeader[]) => onUpdate({ ...provider, headers });
 
   return (
@@ -437,7 +430,7 @@ function HeaderSection({
     >
       {provider.protocol === "anthropic-messages" ? (
         <Text
-          modifiers={[font({ size: 13 }), foregroundStyle("#8a8a8e")]}
+          modifiers={[font({ size: 15 }), foregroundStyle(colors["muted-foreground"])]}
         >
           anthropic-version: 2023-06-01（自动）
         </Text>
@@ -491,6 +484,7 @@ function RequestHeaderRow({
   onChange: (header: RequestHeader) => void;
   onRemove: () => void;
 }) {
+  const { colors } = useTheme();
   const nameText = useNativeState(header.name);
   const valueText = useNativeState(header.value);
 
@@ -509,13 +503,14 @@ function RequestHeaderRow({
         modifiers={[autocorrectionDisabled()]}
       />
       <Button onPress={onRemove} modifiers={[buttonStyle("plain")]}>
-        <Image systemName="minus.circle" size={17} color="#ff453a" />
+        <Image systemName="minus.circle" size={17} color={colors.destructive} />
       </Button>
     </HStack>
   );
 }
 
 function AddHeaderRow({ onAdd }: { onAdd: (header: RequestHeader) => void }) {
+  const { colors } = useTheme();
   const [name, setName] = useState("");
   const [value, setValue] = useState("");
   const nameText = useNativeState("");
@@ -535,8 +530,35 @@ function AddHeaderRow({ onAdd }: { onAdd: (header: RequestHeader) => void }) {
           setValue("");
         }}
       >
-        <Image systemName="plus.circle" size={17} color="#0a84ff" />
+        <Image systemName="plus.circle" size={17} color={colors.info} />
       </Button>
+    </HStack>
+  );
+}
+
+/** 标签左、值右对齐的一行 —— iOS 设置里文本字段的标准形态。 */
+function LabeledField({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <HStack spacing={12}>
+      <Text modifiers={[font({ size: 17 }), frame({ maxWidth: 10000, alignment: "leading" })]}>
+        {label}
+      </Text>
+      <Spacer />
+      {children}
+    </HStack>
+  );
+}
+
+/** 只读键值行：没有 chevron，值用灰色。 */
+function InfoRow({ label, value }: { label: string; value: string }) {
+  const { colors } = useTheme();
+  return (
+    <HStack spacing={12}>
+      <Text modifiers={[font({ size: 17 })]}>{label}</Text>
+      <Spacer />
+      <Text modifiers={[font({ size: 15 }), foregroundStyle(colors["muted-foreground"])]}>
+        {value}
+      </Text>
     </HStack>
   );
 }

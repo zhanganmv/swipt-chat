@@ -24,7 +24,6 @@ import {
 
 import {
   modelCountLabel,
-  proxyHostOf,
   type ModelProvider,
   type ModelProviderTemplate,
   type ProviderModel,
@@ -67,8 +66,8 @@ export function ProviderListPage({
     key: template.id,
     title: template.name,
     footer: template.custom
-      ? "用于中转站、网关、本地模型等第三方兼容端点。"
-      : `仅用于 ${template.name} 官方 API Key，可修改 Base URL 走代理。第三方兼容服务请使用「自定义」创建。`,
+      ? "第三方兼容端点。"
+      : `${template.name} 官方 API Key。`,
     rows: providers.filter((provider) => provider.templateId === template.id),
   }));
 
@@ -94,22 +93,16 @@ export function ProviderListPage({
         modifiers={[
           listStyle("insetGrouped"),
           navigationTitle("模型服务"),
-          navigationBarTitleDisplayMode("large"),
+          navigationBarTitleDisplayMode("inline"),
         ]}
       >
         {shown.length === 0 ? (
           <Section
             footer={
-              <Footer text="内置组只服务厂商官方 API Key；第三方中转、网关与本地模型请建在「自定义」。" />
+              <Footer text="尚未配置模型服务。点击右上角 + 从模板创建；第三方中转、网关与本地模型请建在「自定义」。" />
             }
           >
-            <VStack alignment="leading" spacing={10}>
-              <Muted text="尚未配置模型服务。" />
-              <Muted text="点击右上角 + 从模板创建连接。" />
-              <Menu label={<Text modifiers={[font({ size: 16 })]}>从模板创建</Text>}>
-                {templateButtons(templates, onCreate)}
-              </Menu>
-            </VStack>
+            <Text modifiers={[font({ size: 17 })]}>暂无模型服务</Text>
           </Section>
         ) : (
           shown.map((group) => (
@@ -119,29 +112,21 @@ export function ProviderListPage({
               footer={<Footer text={group.footer} />}
             >
               {group.rows.map((provider) => {
-                const proxy = proxyHostOf(templates, provider);
                 const count = modelCountLabel(models[provider.id]?.length ?? 0);
                 return (
                   <SwipeActions key={provider.id}>
                     <NavigationLink value={providerRoute(provider.id)}>
                       <HStack spacing={12}>
-                        <VStack alignment="leading" spacing={2}>
-                          <Text modifiers={[font({ size: 16 })]}>{provider.name}</Text>
-                          {proxy === "" ? null : (
-                            <Text
-                              modifiers={[
-                                font({ size: 13 }),
-                                foregroundStyle(colors["muted-foreground"]),
-                              ]}
-                            >
-                              {proxy}
-                            </Text>
-                          )}
-                        </VStack>
+                        <Text modifiers={[font({ size: 17 })]}>{provider.name}</Text>
                         <Spacer />
+                        {provider.apiKey.trim() === "" ? (
+                          <Text modifiers={[font({ size: 15 }), foregroundStyle(colors.warning)]}>
+                            缺少 API Key
+                          </Text>
+                        ) : null}
                         <Text
                           modifiers={[
-                            font({ size: 13 }),
+                            font({ size: 15 }),
                             foregroundStyle(colors["muted-foreground"]),
                           ]}
                         >

@@ -22,6 +22,9 @@ import { ProviderSheet } from "./shell/ProviderSheet.tsx";
 import { SessionListSheet, type SessionRow } from "./shell/SessionListSheet.tsx";
 import { useChat } from "./state/useChat.ts";
 import { installErrorCapture } from "./log.ts";
+
+/** Shown in 设置 › 关于. Kept in sync with package.json `swiplet.versionCode`. */
+const APP_VERSION = "0.1.0 (37)";
 import { PROVIDERS_ROUTE, providerRoute, settingsPath } from "./routes.ts";
 import { ThemeProvider, useTheme } from "./theme/index.tsx";
 
@@ -204,7 +207,7 @@ function Shell() {
             models={state.models}
             agents={state.agents}
             agentId={state.agentId}
-            sessionCount={state.conversations.length}
+            version={APP_VERSION}
             actions={actions}
             onCreateProvider={startCreate}
             onDeleteProvider={deleteProvider}

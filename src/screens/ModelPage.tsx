@@ -1,6 +1,7 @@
 import { useState } from "react";
 import {
-  Form,
+  List,
+  NavigationLink,
   Picker,
   Section,
   Slider,
@@ -15,6 +16,7 @@ import {
   font,
   foregroundStyle,
   keyboardType,
+  listStyle,
   navigationBarTitleDisplayMode,
   navigationTitle,
   tag,
@@ -76,8 +78,9 @@ export function ModelPage({
 
   return (
     <Toolbar>
-      <Form
+      <List
         modifiers={[
+          listStyle("insetGrouped"),
           navigationTitle(model.displayName),
           navigationBarTitleDisplayMode("inline"),
         ]}
@@ -93,7 +96,7 @@ export function ModelPage({
           </Text>
           <TextField text={nameText} placeholder="显示名称" onTextChange={setDisplayName} />
           <TextField text={noteText} placeholder="备注（可选）" onTextChange={setNote} />
-          <Text modifiers={[font({ size: 12 }), foregroundStyle("#8a8a8e")]}>
+          <Text modifiers={[font({ size: 15 }), foregroundStyle(colors["muted-foreground"])]}>
             协议：{PROTOCOL_LABEL[provider.protocol]}
           </Text>
         </Section>
@@ -207,18 +210,17 @@ export function ModelPage({
           />
         </Section>
 
-        <Section title="输入模态">
-          <Muted text="文本（始终启用）" />
+        <Section title="输入模态" footer={<Footer text="文本始终启用。" />}>
           <Toggle
             label="图像"
             isOn={model.image}
             onIsOnChange={(image) => patch({ image })}
           />
-          <Text modifiers={[font({ size: 12 }), foregroundStyle("#8a8a8e")]}>
+          <Text modifiers={[font({ size: 15 }), foregroundStyle(colors["muted-foreground"])]}>
             ID: {model.id}
           </Text>
         </Section>
-      </Form>
+      </List>
     </Toolbar>
   );
 }
@@ -253,7 +255,7 @@ function SamplingRow({
       ) : (
         <>
           <Slider
-            value={disabled ? 0 : value}
+            value={value}
             min={min}
             max={max}
             step={0.1}
