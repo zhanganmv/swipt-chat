@@ -1,6 +1,6 @@
 import { Client } from "@swipt/api/http";
 
-import type { Endpoint, Instance } from "../domain/service.ts";
+import type { ChatEndpoint, ModelProvider } from "../domain/provider.ts";
 import type { Message } from "../domain/types.ts";
 import { ChatFailure } from "./errors.ts";
 import {
@@ -160,36 +160,36 @@ async function call(
  * timeout and a 4xx/5xx both arrive as `ChatFailure`.
  */
 export async function requestChat(
-  endpoint: Endpoint,
+  endpoint: ChatEndpoint,
   messages: readonly Message[],
   stream: boolean,
   signal: AbortSignal | undefined,
 ): Promise<Response> {
   const deadline = new Deadline(REQUEST_TIMEOUT_MS, signal);
   return call(
-    chatEndpointOf(endpoint.instance),
+    chatEndpointOf(endpoint.provider),
     {
       method: "POST",
-      headers: headersOf(endpoint.instance),
-      body: bodyOf(endpoint.instance, endpoint.model, messages, stream),
+      headers: headersOf(endpoint.provider),
+      body: bodyOf(endpoint.provider, endpoint.model, messages, stream),
     },
     deadline,
   );
 }
 
 /**
- * List the models an instance exposes, which doubles as the connectivity probe:
+ * List the models a provider exposes, which doubles as the connectivity probe:
  * a wrong address, key or protocol fails here, before the user has typed
  * anything into the chat.
  */
 export async function requestModels(
-  instance: Instance,
+  provider: ModelProvider,
   signal: AbortSignal | undefined,
 ): Promise<string[]> {
   const deadline = new Deadline(MODELS_TIMEOUT_MS, signal);
   const response = await call(
-    modelsEndpointOf(instance),
-    { method: "GET", headers: headersOf(instance) },
+    modelsEndpointOf(provider),
+    { method: "GET", headers: headersOf(provider) },
     deadline,
   );
   return modelIdsOf(await response.text());
@@ -198,7 +198,7 @@ export async function requestModels(
 /**
  * Reachability check for the diagnostics page.
  *
- * Deliberately independent of the user's instance: it answers "can this build
+ * Deliberately independent of the user's provider: it answers "can this build
  * of Swipt send an HTTP request at all", which is a different question from
  * "is this Base URL right". Any HTTP status counts as reachable — 401 from the
  * endpoint still proves the round trip happened.

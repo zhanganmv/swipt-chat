@@ -23,10 +23,10 @@ import {
 import {
   PROTOCOL_LABEL,
   thinkingError,
-  type Instance,
-  type ModelConfig,
+  type ModelProvider,
+  type ProviderModel,
   type ThinkingEffort,
-} from "../domain/service.ts";
+} from "../domain/provider.ts";
 import { useTheme } from "../theme/index.tsx";
 import { FieldError, Footer, Muted } from "./parts.tsx";
 
@@ -36,20 +36,20 @@ const EFFORTS: ThinkingEffort[] = ["low", "medium", "high"];
  * 模型详情. Every edit saves immediately, like the rest of settings; there is no
  * 保存 button and no "unsaved changes" prompt to dismiss.
  *
- * The fields shown depend on the instance protocol: budget tokens only exist
+ * The fields shown depend on the provider protocol: budget tokens only exist
  * for Anthropic, and temperature is capped at 1 there.
  */
 export function ModelPage({
-  instance,
+  provider,
   model,
   onChange,
 }: {
-  instance: Instance;
-  model: ModelConfig;
-  onChange: (model: ModelConfig) => void;
+  provider: ModelProvider;
+  model: ProviderModel;
+  onChange: (model: ProviderModel) => void;
 }) {
   const { colors } = useTheme();
-  const anthropic = instance.protocol === "anthropic-messages";
+  const anthropic = provider.protocol === "anthropic-messages";
 
   const [displayName, setDisplayName] = useState(model.displayName);
   const [note, setNote] = useState(model.note);
@@ -67,9 +67,9 @@ export function ModelPage({
   const maxOutputText = useNativeState(maxOutput);
   const contextText = useNativeState(contextWindow);
 
-  const patch = (next: Partial<ModelConfig>) => onChange({ ...model, ...next });
+  const patch = (next: Partial<ProviderModel>) => onChange({ ...model, ...next });
   const budgetError = thinkingError(
-    instance.protocol,
+    provider.protocol,
     model.thinking,
     model.maxOutputTokens,
   );
@@ -94,7 +94,7 @@ export function ModelPage({
           <TextField text={nameText} placeholder="显示名称" onTextChange={setDisplayName} />
           <TextField text={noteText} placeholder="备注（可选）" onTextChange={setNote} />
           <Text modifiers={[font({ size: 12 }), foregroundStyle("#8a8a8e")]}>
-            协议：{PROTOCOL_LABEL[instance.protocol]}
+            协议：{PROTOCOL_LABEL[provider.protocol]}
           </Text>
         </Section>
 

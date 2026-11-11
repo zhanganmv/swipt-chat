@@ -27,7 +27,7 @@ import { Footer, Muted } from "../screens/parts.tsx";
 /**
  * The candidate panel: a fetched catalogue is only ever a *selection*. Nothing
  * is added until 添加所选, and models already configured are shown as 已添加 so
- * the list and the instance still agree.
+ * the list and the provider still agree.
  */
 export function CandidateSheet({
   visible,

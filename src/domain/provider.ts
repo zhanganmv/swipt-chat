@@ -1,33 +1,41 @@
 /**
- * Model services: templates, connections (instances) and their model entries.
+ * Model providers: templates, the connections the user creates, and the models
+ * configured under each connection.
  *
- * Vocabulary follows `docs/model-service.md`:
- * - a **template** is a creation entry (OpenAI / Anthropic / DeepSeek / 自定义),
- *   never a managed row;
- * - an **instance** is what the user creates, groups and deletes;
- * - a **model** is one id under an instance, with its own parameters.
+ * Vocabulary matches the database (`src/state/schema.ts`):
+ * - a **template** (`model_provider_template`) is a creation entry and the
+ *   home-page group — OpenAI / Anthropic / DeepSeek / 自定义 — seeded from SQL,
+ *   never created by the user;
+ * - a **provider** (`model_provider`) is what the user creates and deletes;
+ * - a **model** (`model_provider_model`) is one id under a provider, with its
+ *   own parameters.
  *
  * Templates only decide defaults, the protocol and the group on the home page.
- * Everything else is the instance's own.
+ * Everything else belongs to the provider.
  */
 
-/** Wire protocol of an instance. */
+/** Wire protocol of a provider. */
 export type Protocol = "openai-chat" | "openai-responses" | "anthropic-messages";
 
-/** Creation entry; also the home-page group. */
-export type TemplateId = "openai" | "anthropic" | "deepseek" | "custom";
+/** Every protocol, in the order the pickers list them. */
+export const PROTOCOLS: readonly Protocol[] = [
+  "openai-chat",
+  "openai-responses",
+  "anthropic-messages",
+];
 
 /** OpenAI reasoning intensity. */
 export type ThinkingEffort = "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
-export interface Header {
+export interface RequestHeader {
   name: string;
   value: string;
 }
 
-export interface Instance {
+export interface ModelProvider {
   id: string;
-  templateId: TemplateId;
+  /** `model_provider_template.id` the provider was created from. */
+  templateId: string;
   /** User-facing name, e.g. "OpenAI 主号"; trimmed and non-empty. */
   name: string;
   protocol: Protocol;
@@ -35,7 +43,7 @@ export interface Instance {
   apiKey: string;
   stream: boolean;
   /** Custom request headers; auto headers can be overridden by name. */
-  headers: Header[];
+  headers: RequestHeader[];
 }
 
 export interface Thinking {
@@ -46,7 +54,7 @@ export interface Thinking {
   budget: number | null;
 }
 
-export interface ModelConfig {
+export interface ProviderModel {
   /** Model id — immutable after creation; also the row key. */
   id: string;
   displayName: string;
@@ -61,87 +69,59 @@ export interface ModelConfig {
 }
 
 /** The pair a turn is actually sent to: a connection and one of its models. */
-export interface Endpoint {
-  instance: Instance;
-  model: ModelConfig;
+export interface ChatEndpoint {
+  provider: ModelProvider;
+  model: ProviderModel;
 }
 
-export interface Template {
-  id: TemplateId;
-  vendor: string;
-  /** Pre-filled name for a new instance. */
+/**
+ * A creation entry and home-page group.
+ *
+ * Rows live in `model_provider_template` and are written by the seed SQL in
+ * `src/state/seed.ts`; no vendor is hard-coded here. Adding a vendor is a seed
+ * change, not a code change.
+ */
+export interface ModelProviderTemplate {
+  id: string;
+  /** Vendor name, e.g. "OpenAI"; the group header on the home page. */
+  name: string;
+  /** Pre-filled name for a new provider; empty when the user must type one. */
   defaultName: string;
-  defaultBaseURL: string;
+  baseURL: string;
   /** Host of the official endpoint; a different host is worth showing. */
-  officialHost: string;
-  /** Protocol a new instance starts with. */
+  host: string;
+  /** Protocol a new provider starts with. */
   protocol: Protocol;
-  /** Protocols the instance may switch to; a single entry means read-only. */
+  /** Protocols the provider may switch to; a single entry means read-only. */
   protocols: readonly Protocol[];
+  /** The 自定义 group: third-party compatible endpoints. */
+  custom: boolean;
 }
 
-const OPENAI = "https://api.openai.com/v1";
-const ANTHROPIC = "https://api.anthropic.com";
-const DEEPSEEK = "https://api.deepseek.com/v1";
-
-export const TEMPLATES: readonly Template[] = [
-  {
-    id: "openai",
-    vendor: "OpenAI",
-    defaultName: "OpenAI",
-    defaultBaseURL: OPENAI,
-    officialHost: "api.openai.com",
-    protocol: "openai-chat",
-    protocols: ["openai-chat", "openai-responses"],
-  },
-  {
-    id: "anthropic",
-    vendor: "Anthropic",
-    defaultName: "Anthropic",
-    defaultBaseURL: ANTHROPIC,
-    officialHost: "api.anthropic.com",
-    protocol: "anthropic-messages",
-    protocols: ["anthropic-messages"],
-  },
-  {
-    id: "deepseek",
-    vendor: "DeepSeek",
-    defaultName: "DeepSeek",
-    defaultBaseURL: DEEPSEEK,
-    officialHost: "api.deepseek.com",
-    protocol: "openai-chat",
-    protocols: ["openai-chat"],
-  },
-  {
-    id: "custom",
-    vendor: "自定义",
-    defaultName: "",
-    defaultBaseURL: "",
-    officialHost: "",
-    protocol: "openai-chat",
-    protocols: ["openai-chat", "openai-responses", "anthropic-messages"],
-  },
-];
-
-/** Home-page group order; empty groups are hidden. */
-export const GROUP_ORDER: readonly TemplateId[] = [
-  "openai",
-  "anthropic",
-  "deepseek",
-  "custom",
-];
-
-export function templateOf(id: string): Template {
-  return TEMPLATES.find((item) => item.id === id) ?? TEMPLATES[TEMPLATES.length - 1];
+/** The template row for `id`, or `undefined` once the seed dropped it. */
+export function templateOf(
+  templates: readonly ModelProviderTemplate[],
+  id: string,
+): ModelProviderTemplate | undefined {
+  return templates.find((item) => item.id === id);
 }
 
-export function protocolsOf(templateId: TemplateId): readonly Protocol[] {
-  return templateOf(templateId).protocols;
+export function protocolsOf(
+  templates: readonly ModelProviderTemplate[],
+  templateId: string,
+): readonly Protocol[] {
+  return templateOf(templates, templateId)?.protocols ?? PROTOCOLS;
 }
 
 /** `true` when the protocol picker should be interactive on the detail page. */
-export function protocolEditable(instance: Instance): boolean {
-  return protocolsOf(instance.templateId).length > 1;
+export function protocolEditable(
+  templates: readonly ModelProviderTemplate[],
+  provider: ModelProvider,
+): boolean {
+  // A provider whose template row is gone must not offer a protocol switch:
+  // nothing knows what that family supports any more.
+  const template = templateOf(templates, provider.templateId);
+  return template !== undefined && template.protocols.length > 1;
 }
 
 export const PROTOCOL_LABEL: Record<Protocol, string> = {
@@ -168,9 +148,11 @@ export function protocolPlaceholder(protocol: Protocol): string {
     : "https://api.example.com/v1";
 }
 
-/** The link a row's title should be; the instance name is already mandatory. */
-export const nameOf = (instance: Instance): string =>
-  instance.name.trim() === "" ? templateOf(instance.templateId).defaultName : instance.name;
+/** The row title: the name the user typed, or the endpoint host as a last resort. */
+export const nameOf = (provider: ModelProvider): string => {
+  const name = provider.name.trim();
+  return name === "" ? hostOf(provider.baseURL) : name;
+};
 
 /** Host part of a URL, or `""` when it cannot be read. */
 export function hostOf(value: string): string {
@@ -187,26 +169,28 @@ export function isValidURL(value: string): boolean {
 }
 
 /**
- * Subtitle of an instance row: the proxy host when it differs from the
- * template's official domain, nothing otherwise. Custom instances always show
+ * Subtitle of the provider row: the proxy host when it differs from the
+ * template's official domain, nothing otherwise. Custom providers always show
  * their host.
  */
-export function proxyHostOf(instance: Instance): string {
-  const host = hostOf(instance.baseURL);
-  return host === "" || host === templateOf(instance.templateId).officialHost
-    ? ""
-    : host;
+export function proxyHostOf(
+  templates: readonly ModelProviderTemplate[],
+  provider: ModelProvider,
+): string {
+  const host = hostOf(provider.baseURL);
+  const official = templateOf(templates, provider.templateId)?.host ?? "";
+  return host === "" || host === official ? "" : host;
 }
 
 /** "3 个模型" / "未添加模型" */
 export const modelCountLabel = (count: number): string =>
   count === 0 ? "未添加模型" : `${count} 个模型`;
 
-export function modelNameOf(model: ModelConfig | null): string {
+export function modelNameOf(model: ProviderModel | null): string {
   return model === null ? "本地 Mock" : model.displayName.trim() === "" ? model.id : model.displayName;
 }
 
-export function firstModelOf(models: readonly ModelConfig[]): ModelConfig | undefined {
+export function firstModelOf(models: readonly ProviderModel[]): ProviderModel | undefined {
   return models[0];
 }
 
@@ -216,7 +200,7 @@ export const newThinking = (): Thinking => ({
   budget: null,
 });
 
-export function newModel(id: string): ModelConfig {
+export function newModel(id: string): ProviderModel {
   return {
     id,
     displayName: id,
@@ -230,13 +214,14 @@ export function newModel(id: string): ModelConfig {
   };
 }
 
-export function newInstance(input: {
-  templateId: TemplateId;
+export function newProvider(input: {
+  /** Row id of a `model_provider_template`; the name is the provider's. */
+  templateId: string;
   name: string;
   protocol: Protocol;
   baseURL: string;
   apiKey: string;
-}): Instance {
+}): ModelProvider {
   return {
     id: "",
     templateId: input.templateId,
@@ -249,7 +234,7 @@ export function newInstance(input: {
   };
 }
 
-export function instanceNameError(name: string): string | null {
+export function providerNameError(name: string): string | null {
   return name.trim() === "" ? "请输入连接名称" : null;
 }
 
@@ -283,7 +268,7 @@ export function thinkingError(
 }
 
 /** A header name is present at most once, compared case-insensitively. */
-export function duplicateHeader(headers: readonly Header[], name: string): boolean {
+export function duplicateHeader(headers: readonly RequestHeader[], name: string): boolean {
   const target = name.trim().toLowerCase();
   let seen = 0;
   for (const header of headers) {
@@ -295,7 +280,7 @@ export function duplicateHeader(headers: readonly Header[], name: string): boole
 }
 
 /** Field-wise equality, used to keep no-op edits from producing new state. */
-export function sameInstance(left: Instance, right: Instance): boolean {
+export function sameProvider(left: ModelProvider, right: ModelProvider): boolean {
   return (
     left.templateId === right.templateId &&
     left.name === right.name &&
@@ -312,7 +297,7 @@ export function sameInstance(left: Instance, right: Instance): boolean {
   );
 }
 
-export function sameModelConfig(left: ModelConfig, right: ModelConfig): boolean {
+export function sameModel(left: ProviderModel, right: ProviderModel): boolean {
   return (
     left.id === right.id &&
     left.displayName === right.displayName &&

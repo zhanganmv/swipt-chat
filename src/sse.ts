@@ -1,4 +1,4 @@
-import type { Protocol } from "./domain/service.ts";
+import type { Protocol } from "./domain/provider.ts";
 
 /**
  * SSE line parsing for the three protocols, kept free of host imports so it can

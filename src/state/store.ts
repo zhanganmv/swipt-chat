@@ -11,13 +11,13 @@
  * `scripts/check.ts` runs these same functions against `node:sqlite`.
  */
 import type {
-  Instance,
-  ModelConfig,
+  ModelProvider,
+  ModelProviderTemplate,
   Protocol,
-  TemplateId,
+  ProviderModel,
   ThinkingEffort,
-} from "../domain/service.ts";
-import { firstModelOf } from "../domain/service.ts";
+} from "../domain/provider.ts";
+import { PROTOCOLS, firstModelOf } from "../domain/provider.ts";
 import type {
   Agent,
   Conversation,
@@ -30,7 +30,7 @@ import type { SqlDriver } from "./sql.ts";
 /** Keys in `app_state` that are not a user-facing record of their own. */
 export type StateKey =
   | "current_session"
-  | "active_instance"
+  | "active_provider"
   | "active_model"
   | "active_agent"
   | "draft";
@@ -39,11 +39,13 @@ export interface Snapshot {
   conversations: Conversation[];
   currentId: string | null;
   draft: string;
-  /** Every configured connection, in home-page order. */
-  instances: Instance[];
-  instanceId: string | null;
-  /** Models configured under each instance, in insertion order. */
-  models: Record<string, ModelConfig[]>;
+  /** Provider templates, in home-page group order. */
+  templates: ModelProviderTemplate[];
+  /** Every configured provider, in creation order. */
+  providers: ModelProvider[];
+  providerId: string | null;
+  /** Models configured under each provider, in insertion order. */
+  models: Record<string, ProviderModel[]>;
   modelId: string | null;
   agents: Agent[];
   agentId: string | null;
@@ -53,8 +55,9 @@ export const emptySnapshot = (): Snapshot => ({
   conversations: [],
   currentId: null,
   draft: "",
-  instances: [],
-  instanceId: null,
+  templates: [],
+  providers: [],
+  providerId: null,
   models: {},
   modelId: null,
   agents: [],
@@ -65,15 +68,15 @@ export type StoreOp =
   | { kind: "session"; id: string; title: string; updatedAt: number }
   | { kind: "session.delete"; id: string }
   | { kind: "message"; sessionId: string; seq: number; message: Message }
-  | { kind: "instance"; instance: Instance; position: number }
-  | { kind: "instance.delete"; id: string }
+  | { kind: "provider"; provider: ModelProvider }
+  | { kind: "provider.delete"; id: string }
   | {
       kind: "model";
-      instanceId: string;
-      model: ModelConfig;
+      providerId: string;
+      model: ProviderModel;
       position: number;
     }
-  | { kind: "model.delete"; instanceId: string; modelId: string }
+  | { kind: "model.delete"; providerId: string; modelId: string }
   | { kind: "agent"; agent: Agent }
   | { kind: "agent.delete"; id: string }
   | { kind: "state"; key: StateKey; value: string | null };
@@ -94,7 +97,19 @@ interface MessageRow {
   seq: number;
 }
 
-interface InstanceRow {
+interface TemplateRow {
+  id: string;
+  name: string;
+  default_name: string;
+  protocol: string;
+  protocols: string;
+  base_url: string;
+  host: string;
+  custom: number;
+  position: number;
+}
+
+interface ModelProviderRow {
   id: string;
   template_id: string;
   name: string;
@@ -104,14 +119,14 @@ interface InstanceRow {
   api_key: string | null;
 }
 
-interface HeaderRow {
-  instance_id: string;
+interface RequestHeaderRow {
+  provider_id: string;
   name: string;
   value: string;
 }
 
 interface ModelRow {
-  instance_id: string;
+  provider_id: string;
   id: string;
   display_name: string;
   note: string;
@@ -132,24 +147,19 @@ interface AgentRow {
 
 const ai = (value: number): boolean => value !== 0;
 
-const PROTOCOLS: readonly Protocol[] = [
-  "openai-chat",
-  "openai-responses",
-  "anthropic-messages",
-];
-
 const protocolOf = (value: string): Protocol =>
   PROTOCOLS.find((item) => item === value) ?? "openai-chat";
 
-const TEMPLATE_IDS: readonly TemplateId[] = [
-  "openai",
-  "anthropic",
-  "deepseek",
-  "custom",
-];
-
-const templateIdOf = (value: string): TemplateId =>
-  TEMPLATE_IDS.find((item) => item === value) ?? "custom";
+/** The seed stores the protocols a template may use as a comma-separated list. */
+const protocolsOfRow = (value: string): readonly Protocol[] => {
+  const list = value
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item): item is Protocol =>
+      PROTOCOLS.some((protocol) => protocol === item),
+    );
+  return list.length === 0 ? ["openai-chat"] : list;
+};
 
 const EFFORTS: readonly ThinkingEffort[] = [
   "minimal",
@@ -162,6 +172,17 @@ const EFFORTS: readonly ThinkingEffort[] = [
 
 const effortOf = (value: string | null): ThinkingEffort | null =>
   EFFORTS.find((item) => item === value) ?? null;
+
+const templateOfRow = (row: TemplateRow): ModelProviderTemplate => ({
+  id: row.id,
+  name: row.name,
+  defaultName: row.default_name,
+  baseURL: row.base_url,
+  host: row.host,
+  protocol: protocolOf(row.protocol),
+  protocols: protocolsOfRow(row.protocols),
+  custom: ai(row.custom),
+});
 
 /**
  * A reply interrupted by a process kill must not come back as "still
@@ -185,7 +206,7 @@ function messageOf(row: MessageRow): Message {
   return message;
 }
 
-function modelOf(row: ModelRow): ModelConfig {
+function modelOf(row: ModelRow): ProviderModel {
   return {
     id: row.id,
     displayName: row.display_name,
@@ -228,47 +249,54 @@ export async function loadSnapshot(driver: SqlDriver): Promise<Snapshot> {
     updatedAt: row.last_activity_at,
   }));
 
-  const instanceRows = await driver.all<InstanceRow>(
-    `SELECT i.id, i.template_id, i.name, i.protocol, i.base_url, i.stream, s.api_key
-     FROM instance i LEFT JOIN instance_secret s ON s.instance_id = i.id
-     ORDER BY i.position, i.id`,
+  const templates: ModelProviderTemplate[] = (
+    await driver.all<TemplateRow>(
+      `SELECT id, name, default_name, protocol, protocols, base_url, host, custom, position
+       FROM model_provider_template ORDER BY position, id`,
+    )
+  ).map(templateOfRow);
+
+  const providerRows = await driver.all<ModelProviderRow>(
+    `SELECT p.id, p.template_id, p.name, p.protocol, p.base_url, p.stream, s.api_key
+     FROM model_provider p LEFT JOIN model_provider_secret s ON s.provider_id = p.id
+     ORDER BY p.created_at, p.id`,
   );
-  const headerRows = await driver.all<HeaderRow>(
-    "SELECT instance_id, name, value FROM instance_header ORDER BY instance_id, position",
+  const headerRows = await driver.all<RequestHeaderRow>(
+    "SELECT provider_id, name, value FROM model_provider_header ORDER BY provider_id, name",
   );
-  const headersByInstance = new Map<string, { name: string; value: string }[]>();
+  const headersByProvider = new Map<string, { name: string; value: string }[]>();
   for (const row of headerRows) {
-    const list = headersByInstance.get(row.instance_id);
+    const list = headersByProvider.get(row.provider_id);
     const header = { name: row.name, value: row.value };
     if (list === undefined) {
-      headersByInstance.set(row.instance_id, [header]);
+      headersByProvider.set(row.provider_id, [header]);
     } else {
       list.push(header);
     }
   }
 
-  const instances: Instance[] = instanceRows.map((row) => ({
+  const providers: ModelProvider[] = providerRows.map((row) => ({
     id: row.id,
-    templateId: templateIdOf(row.template_id),
+    templateId: row.template_id,
     name: row.name,
     protocol: protocolOf(row.protocol),
     baseURL: row.base_url,
     apiKey: row.api_key ?? "",
     stream: ai(row.stream),
-    headers: headersByInstance.get(row.id) ?? [],
+    headers: headersByProvider.get(row.id) ?? [],
   }));
 
   const modelRows = await driver.all<ModelRow>(
-    `SELECT instance_id, id, display_name, note, max_output_tokens, context_window,
+    `SELECT provider_id, id, display_name, note, max_output_tokens, context_window,
             thinking, effort, budget, temperature, top_p, image
-     FROM model_config ORDER BY instance_id, position, created_at, id`,
+     FROM model_provider_model ORDER BY provider_id, position, created_at, id`,
   );
-  const models: Record<string, ModelConfig[]> = {};
+  const models: Record<string, ProviderModel[]> = {};
   for (const row of modelRows) {
     const model = modelOf(row);
-    const list = models[row.instance_id];
+    const list = models[row.provider_id];
     if (list === undefined) {
-      models[row.instance_id] = [model];
+      models[row.provider_id] = [model];
     } else {
       list.push(model);
     }
@@ -295,19 +323,20 @@ export async function loadSnapshot(driver: SqlDriver): Promise<Snapshot> {
       ? storedSession
       : null;
 
-  const storedInstance = state.get("active_instance") ?? null;
-  const instance =
-    storedInstance !== null
-      ? instances.find((item) => item.id === storedInstance)
+  const storedProvider = state.get("active_provider") ?? null;
+  const provider =
+    storedProvider !== null
+      ? providers.find((item) => item.id === storedProvider)
       : undefined;
-  const activeInstance = instance ?? instances[0] ?? null;
+  const activeProvider = provider ?? providers[0] ?? null;
 
   const storedModel = state.get("active_model") ?? null;
-  const instanceModels = activeInstance === null ? [] : (models[activeInstance.id] ?? []);
+  const providerModels =
+    activeProvider === null ? [] : (models[activeProvider.id] ?? []);
   const modelId =
-    storedModel !== null && instanceModels.some((item) => item.id === storedModel)
+    storedModel !== null && providerModels.some((item) => item.id === storedModel)
       ? storedModel
-      : (firstModelOf(instanceModels)?.id ?? null);
+      : (firstModelOf(providerModels)?.id ?? null);
 
   const storedAgent = state.get("active_agent") ?? null;
   const agentId =
@@ -319,8 +348,9 @@ export async function loadSnapshot(driver: SqlDriver): Promise<Snapshot> {
     conversations,
     currentId,
     draft: state.get("draft") ?? "",
-    instances,
-    instanceId: activeInstance?.id ?? null,
+    templates,
+    providers,
+    providerId: activeProvider?.id ?? null,
     models,
     modelId,
     agents,
@@ -388,72 +418,69 @@ const applyOp = async (driver: SqlDriver, op: StoreOp): Promise<void> => {
       );
       return;
 
-    case "instance": {
-      const { instance } = op;
+    case "provider": {
+      const { provider } = op;
       await driver.run(
-        `INSERT INTO instance
-           (id, template_id, name, protocol, base_url, stream, position, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO model_provider
+           (id, template_id, name, protocol, base_url, stream, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            template_id = excluded.template_id,
            name = excluded.name,
            protocol = excluded.protocol,
            base_url = excluded.base_url,
            stream = excluded.stream,
-           position = excluded.position,
            updated_at = excluded.updated_at`,
         [
-          instance.id,
-          instance.templateId,
-          instance.name,
-          instance.protocol,
-          instance.baseURL,
-          instance.stream ? 1 : 0,
-          op.position,
+          provider.id,
+          provider.templateId,
+          provider.name,
+          provider.protocol,
+          provider.baseURL,
+          provider.stream ? 1 : 0,
           Date.now(),
           Date.now(),
         ],
       );
-      if (instance.apiKey === "") {
-        await driver.run("DELETE FROM instance_secret WHERE instance_id = ?", [
-          instance.id,
+      if (provider.apiKey === "") {
+        await driver.run("DELETE FROM model_provider_secret WHERE provider_id = ?", [
+          provider.id,
         ]);
       } else {
         await driver.run(
-          `INSERT INTO instance_secret (instance_id, api_key) VALUES (?, ?)
-           ON CONFLICT(instance_id) DO UPDATE SET api_key = excluded.api_key`,
-          [instance.id, instance.apiKey],
+          `INSERT INTO model_provider_secret (provider_id, api_key) VALUES (?, ?)
+           ON CONFLICT(provider_id) DO UPDATE SET api_key = excluded.api_key`,
+          [provider.id, provider.apiKey],
         );
       }
-      // Headers are a short ordered list; replacing them wholesale is cheaper
-      // to reason about than diffing positions row by row.
-      await driver.run("DELETE FROM instance_header WHERE instance_id = ?", [
-        instance.id,
+      // Headers are a short set keyed by name; replacing them wholesale is
+      // cheaper to reason about than diffing row by row.
+      await driver.run("DELETE FROM model_provider_header WHERE provider_id = ?", [
+        provider.id,
       ]);
-      for (let index = 0; index < instance.headers.length; index += 1) {
-        const header = instance.headers[index];
+      for (const header of provider.headers) {
         await driver.run(
-          "INSERT INTO instance_header (instance_id, position, name, value) VALUES (?, ?, ?, ?)",
-          [instance.id, index, header.name, header.value],
+          "INSERT INTO model_provider_header (provider_id, name, value) VALUES (?, ?, ?)",
+          [provider.id, header.name, header.value],
         );
       }
       return;
     }
 
-    case "instance.delete":
+    case "provider.delete":
       // Models, secret and headers go with it: every child row cascades.
-      await driver.run("DELETE FROM instance WHERE id = ?", [op.id]);
+      await driver.run("DELETE FROM model_provider WHERE id = ?", [op.id]);
       return;
 
     case "model": {
       const { model } = op;
       await driver.run(
-        `INSERT INTO model_config
-           (instance_id, id, display_name, note, max_output_tokens, context_window,
+        `INSERT INTO model_provider_model
+           (provider_id, id, display_name, note, max_output_tokens, context_window,
             thinking, effort, budget, temperature, top_p, image, position,
             created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(instance_id, id) DO UPDATE SET
+         ON CONFLICT(provider_id, id) DO UPDATE SET
            display_name = excluded.display_name,
            note = excluded.note,
            max_output_tokens = excluded.max_output_tokens,
@@ -467,7 +494,7 @@ const applyOp = async (driver: SqlDriver, op: StoreOp): Promise<void> => {
            position = excluded.position,
            updated_at = excluded.updated_at`,
         [
-          op.instanceId,
+          op.providerId,
           model.id,
           model.displayName,
           model.note,
@@ -489,8 +516,8 @@ const applyOp = async (driver: SqlDriver, op: StoreOp): Promise<void> => {
 
     case "model.delete":
       await driver.run(
-        "DELETE FROM model_config WHERE instance_id = ? AND id = ?",
-        [op.instanceId, op.modelId],
+        "DELETE FROM model_provider_model WHERE provider_id = ? AND id = ?",
+        [op.providerId, op.modelId],
       );
       return;
 

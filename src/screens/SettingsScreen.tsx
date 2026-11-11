@@ -31,17 +31,17 @@ import {
 
 import {
   newModel,
-  type Instance,
-  type ModelConfig,
-  type TemplateId,
-} from "../domain/service.ts";
+  type ModelProvider,
+  type ModelProviderTemplate,
+  type ProviderModel,
+} from "../domain/provider.ts";
 import type { Agent } from "../domain/types.ts";
 import type { ChatActions } from "../state/useChat.ts";
 import { useTheme } from "../theme/index.tsx";
-import { InstancePage } from "./InstancePage.tsx";
+import { ProviderPage } from "./ProviderPage.tsx";
 import { ModelPage } from "./ModelPage.tsx";
 import { DiagnosticsPage } from "./DiagnosticsPage.tsx";
-import { ModelServiceHome } from "./ModelServiceHome.tsx";
+import { ProviderListPage } from "./ProviderListPage.tsx";
 
 /**
  * Settings, all native — the settings half of the app's single `NavigationStack`.
@@ -61,27 +61,29 @@ import { ModelServiceHome } from "./ModelServiceHome.tsx";
  * page is hidden behind the chat.
  */
 export const SettingsPages = memo(function SettingsPages({
-  instances,
+  templates,
+  providers,
   models,
   agents,
   agentId,
   sessionCount,
   actions,
-  onCreateInstance,
-  onDeleteInstance,
+  onCreateProvider,
+  onDeleteProvider,
   onAddAgent,
   onDeleteAgent,
   onSelectAgent,
   onSelfTest,
 }: {
-  instances: readonly Instance[];
-  models: Record<string, ModelConfig[]>;
+  templates: readonly ModelProviderTemplate[];
+  providers: readonly ModelProvider[];
+  models: Record<string, ProviderModel[]>;
   agents: readonly Agent[];
   agentId: string | null;
   sessionCount: number;
   actions: ChatActions;
-  onCreateInstance: (templateId: TemplateId) => void;
-  onDeleteInstance: (instance: Instance) => void;
+  onCreateProvider: (templateId: string) => void;
+  onDeleteProvider: (provider: ModelProvider) => void;
   onAddAgent: () => void;
   onDeleteAgent: (id: string) => void;
   onSelectAgent: (id: string) => void;
@@ -102,10 +104,10 @@ export const SettingsPages = memo(function SettingsPages({
             >
               <Section title="对话">
                 <Row
-                  value="modelService"
+                  value="providers"
                   title="模型服务"
                   icon="server.rack"
-                  trailing={`${instances.length}`}
+                  trailing={`${providers.length}`}
                 />
                 <Row
                   value="agents"
@@ -132,26 +134,28 @@ export const SettingsPages = memo(function SettingsPages({
           </Toolbar>
       </NavigationDestination>
 
-      <NavigationDestination value="modelService">
-        <ModelServiceHome
-          instances={instances}
+      <NavigationDestination value="providers">
+        <ProviderListPage
+          templates={templates}
+          providers={providers}
           models={models}
-          onCreate={onCreateInstance}
-          onDelete={onDeleteInstance}
+          onCreate={onCreateProvider}
+          onDelete={onDeleteProvider}
         />
       </NavigationDestination>
 
-      {instances.map((instance) => (
-        <NavigationDestination key={instance.id} value={`instance/${instance.id}`}>
-          <InstancePage
-            instance={instance}
-            models={models[instance.id] ?? []}
-            onUpdate={actions.updateInstance}
-            onDelete={onDeleteInstance}
+      {providers.map((provider) => (
+        <NavigationDestination key={provider.id} value={`providers/${provider.id}`}>
+          <ProviderPage
+            templates={templates}
+            provider={provider}
+            models={models[provider.id] ?? []}
+            onUpdate={actions.updateProvider}
+            onDelete={onDeleteProvider}
             onFetchModels={actions.fetchModels}
-            onAddModels={(instanceId, ids) => {
+            onAddModels={(providerId, ids) => {
               for (const id of ids) {
-                actions.addModel(instanceId, newModel(id));
+                actions.addModel(providerId, newModel(id));
               }
             }}
             onAddModel={actions.addModel}
@@ -160,16 +164,16 @@ export const SettingsPages = memo(function SettingsPages({
         </NavigationDestination>
       ))}
 
-      {instances.flatMap((instance) =>
-        (models[instance.id] ?? []).map((model) => (
+      {providers.flatMap((provider) =>
+        (models[provider.id] ?? []).map((model) => (
           <NavigationDestination
-            key={`${instance.id}/${model.id}`}
-            value={`model/${instance.id}/${model.id}`}
+            key={`${provider.id}/${model.id}`}
+            value={`providers/${provider.id}/models/${model.id}`}
           >
             <ModelPage
-              instance={instance}
+              provider={provider}
               model={model}
-              onChange={(next) => actions.updateModel(instance.id, next)}
+              onChange={(next) => actions.updateModel(provider.id, next)}
             />
           </NavigationDestination>
         )),

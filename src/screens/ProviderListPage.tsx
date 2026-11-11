@@ -23,41 +23,69 @@ import {
 } from "@expo/ui/swift-ui/modifiers";
 
 import {
-  GROUP_ORDER,
-  templateOf,
   modelCountLabel,
   proxyHostOf,
-  type Instance,
-  type ModelConfig,
-  type TemplateId,
-} from "../domain/service.ts";
+  type ModelProvider,
+  type ModelProviderTemplate,
+  type ProviderModel,
+} from "../domain/provider.ts";
 import { useTheme } from "../theme/index.tsx";
 import { Footer, Muted } from "./parts.tsx";
 
+interface Group {
+  key: string;
+  title: string;
+  footer: string;
+  rows: ModelProvider[];
+}
+
 /**
- * 模型服务首页: instances grouped by template, never by protocol.
+ * 模型服务首页: providers grouped by template, never by protocol.
  *
- * Empty groups are omitted rather than shown as empty sections — a settings
- * page must not look like a checklist of everything you have not configured.
+ * Groups come from the `model_provider_template` rows (seed order), so adding
+ * a provider family is a seed change, not a page change. Empty groups are
+ * omitted rather than shown as empty sections — a settings page must not look
+ * like a checklist of everything you have not configured.
  */
-export function ModelServiceHome({
-  instances,
+export function ProviderListPage({
+  templates,
+  providers,
   models,
   onCreate,
   onDelete,
 }: {
-  instances: readonly Instance[];
-  models: Record<string, ModelConfig[]>;
-  onCreate: (templateId: TemplateId) => void;
-  onDelete: (instance: Instance) => void;
+  templates: readonly ModelProviderTemplate[];
+  providers: readonly ModelProvider[];
+  models: Record<string, ProviderModel[]>;
+  onCreate: (templateId: string) => void;
+  onDelete: (provider: ModelProvider) => void;
 }) {
   const { colors } = useTheme();
 
-  const groups = GROUP_ORDER.map((templateId) => ({
-    templateId,
-    template: templateOf(templateId),
-    rows: instances.filter((instance) => instance.templateId === templateId),
-  })).filter((group) => group.rows.length > 0);
+  const groups: Group[] = templates.map((template) => ({
+    key: template.id,
+    title: template.name,
+    footer: template.custom
+      ? "用于中转站、网关、本地模型等第三方兼容端点。"
+      : `仅用于 ${template.name} 官方 API Key，可修改 Base URL 走代理。第三方兼容服务请使用「自定义」创建。`,
+    rows: providers.filter((provider) => provider.templateId === template.id),
+  }));
+
+  // A provider whose template row is gone would otherwise vanish silently.
+  const orphans = providers.filter(
+    (provider) =>
+      !templates.some((template) => template.id === provider.templateId),
+  );
+  if (orphans.length > 0) {
+    groups.push({
+      key: "",
+      title: "其他",
+      footer: "模板已不存在，删除后重新创建。",
+      rows: orphans,
+    });
+  }
+
+  const shown = groups.filter((group) => group.rows.length > 0);
 
   return (
     <Toolbar>
@@ -68,7 +96,7 @@ export function ModelServiceHome({
           navigationBarTitleDisplayMode("large"),
         ]}
       >
-        {groups.length === 0 ? (
+        {shown.length === 0 ? (
           <Section
             footer={
               <Footer text="内置组只服务厂商官方 API Key；第三方中转、网关与本地模型请建在「自定义」。" />
@@ -78,34 +106,26 @@ export function ModelServiceHome({
               <Muted text="尚未配置模型服务。" />
               <Muted text="点击右上角 + 从模板创建连接。" />
               <Menu label={<Text modifiers={[font({ size: 16 })]}>从模板创建</Text>}>
-                {templateButtons(onCreate)}
+                {templateButtons(templates, onCreate)}
               </Menu>
             </VStack>
           </Section>
         ) : (
-          groups.map((group) => (
+          shown.map((group) => (
             <Section
-              key={group.templateId}
-              title={group.template.vendor}
-              footer={
-                <Footer
-                  text={
-                    group.templateId === "custom"
-                      ? "用于中转站、网关、本地模型等第三方兼容端点。"
-                      : `仅用于 ${group.template.vendor} 官方 API Key，可修改 Base URL 走代理。第三方兼容服务请使用「自定义」创建。`
-                  }
-                />
-              }
+              key={group.key}
+              title={group.title}
+              footer={<Footer text={group.footer} />}
             >
-              {group.rows.map((instance) => {
-                const proxy = proxyHostOf(instance);
-                const count = modelCountLabel(models[instance.id]?.length ?? 0);
+              {group.rows.map((provider) => {
+                const proxy = proxyHostOf(templates, provider);
+                const count = modelCountLabel(models[provider.id]?.length ?? 0);
                 return (
-                  <SwipeActions key={instance.id}>
-                    <NavigationLink value={`instance/${instance.id}`}>
+                  <SwipeActions key={provider.id}>
+                    <NavigationLink value={`provider/${provider.id}`}>
                       <HStack spacing={12}>
                         <VStack alignment="leading" spacing={2}>
-                          <Text modifiers={[font({ size: 16 })]}>{instance.name}</Text>
+                          <Text modifiers={[font({ size: 16 })]}>{provider.name}</Text>
                           {proxy === null ? null : (
                             <Text
                               modifiers={[
@@ -133,7 +153,11 @@ export function ModelServiceHome({
                         label="删除"
                         role="destructive"
                         onPress={() =>
-                          confirmDeleteInstance(instance, () => onDelete(instance))
+                          confirmDeleteProvider(
+                            provider,
+                            models[provider.id]?.length ?? 0,
+                            () => onDelete(provider),
+                          )
                         }
                       />
                     </SwipeActions.Actions>
@@ -147,7 +171,7 @@ export function ModelServiceHome({
       <Toolbar.Content>
         <ToolbarItem placement="topBarTrailing">
           <Menu label="" systemImage="plus">
-            {templateButtons(onCreate)}
+            {templateButtons(templates, onCreate)}
           </Menu>
         </ToolbarItem>
       </Toolbar.Content>
@@ -156,35 +180,27 @@ export function ModelServiceHome({
 }
 
 /** Shared by the toolbar + and the empty-state button. */
-function templateButtons(onCreate: (templateId: TemplateId) => void) {
-  return [
+function templateButtons(
+  templates: readonly ModelProviderTemplate[],
+  onCreate: (templateId: string) => void,
+) {
+  return templates.map((template) => (
     <Button
-      key="openai"
-      label="OpenAI"
-      onPress={() => onCreate("openai")}
-    />,
-    <Button
-      key="anthropic"
-      label="Anthropic"
-      onPress={() => onCreate("anthropic")}
-    />,
-    <Button
-      key="deepseek"
-      label="DeepSeek"
-      onPress={() => onCreate("deepseek")}
-    />,
-    <Button
-      key="custom"
-      label="自定义…"
-      onPress={() => onCreate("custom")}
-    />,
-  ];
+      key={template.id}
+      label={template.custom ? `${template.name}…` : template.name}
+      onPress={() => onCreate(template.id)}
+    />
+  ));
 }
 
-function confirmDeleteInstance(instance: Instance, remove: () => void) {
+function confirmDeleteProvider(
+  provider: ModelProvider,
+  modelCount: number,
+  remove: () => void,
+) {
   Alert.alert(
-    `删除「${instance.name}」？`,
-    "此连接下的所有模型配置将一并移除，且不可恢复。",
+    `删除「${provider.name}」？`,
+    `此连接下的 ${modelCount} 个模型配置将一并移除，且不可恢复。`,
     [
       { text: "取消", style: "cancel" },
       { text: "删除", style: "destructive", onPress: remove },
@@ -192,4 +208,4 @@ function confirmDeleteInstance(instance: Instance, remove: () => void) {
   );
 }
 
-export { confirmDeleteInstance, templateButtons };
+export { confirmDeleteProvider, templateButtons };

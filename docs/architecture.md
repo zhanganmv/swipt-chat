@@ -12,10 +12,10 @@
 
 | 路径 | 职责 | 允许依赖 |
 |---|---|---|
-| `src/domain/` | 类型、reducer、id、模板/实例/模型规则、标题 | 无 host API，纯函数 |
+| `src/domain/` | 类型、reducer、id、模板/连接/模型规则、标题 | 无 host API，纯函数 |
 | `src/api/` | OpenAI 兼容协议：URL/头/体、SSE 解析、错误分类、单回合编排 | `@swipt/api/http`（仅 `request.ts`） |
-| `src/dev/` | 本地 Mock 流（无实例时使用） | 无 |
-| `src/state/` | `useChat` 状态钩子、SQLite schema/store/sync、设备驱动 | `domain`、`api`、`expo-sqlite`（仅 `deviceSql.ts`） |
+| `src/dev/` | 本地 Mock 流（无连接时使用） | 无 |
+| `src/state/` | `useChat` 状态钩子、SQLite schema/seed/store/sync、设备驱动 | `domain`、`api`、`expo-sqlite`（仅 `deviceSql.ts`） |
 | `src/screens/` | 聊天页（RN 正文）、设置页 `SettingsPages`（一组 `NavigationDestination`） | `state`、`shell`、`theme` |
 | `src/shell/` | 顶栏、玻璃控件、四个抽屉（会话列表 / 智能体选择 / 模型服务 / 新建智能体）、抽屉生命周期 | `@expo/ui`、`@swipt/api/swiplet` |
 | `src/App.tsx` | 装配：一个 `NavigationStack`（Chat 作根）+ 常挂载的抽屉 + 宿主主题 | 以上全部 |
@@ -61,17 +61,18 @@
 |---|---|
 | `session` | 会话 `{id,title,created_at,updated_at,last_activity_at}`，列表按 `last_activity_at` 倒序 |
 | `message` | `{id,session_id,role,content,status,error,seq}`，`session_id` 级联删除；`seq` 是会话内顺序 |
-| `instance` | 模型服务实例 `{id,template_id,name,protocol,base_url,stream,position,...}`，**没有 api_key 列**；v3 迁移由旧 `provider` 行生成（template_id 记为 `custom`） |
-| `instance_secret` | `{instance_id,api_key}`，主键即外键，删实例时级联删密钥 |
-| `instance_header` | `{instance_id,position,name,value}`，自定义请求头，按顺序发 |
-| `model_config` | `{instance_id,id,display_name,note,max_output_tokens,context_window,thinking,effort,budget,temperature,top_p,image,position}`，模型 id 在实例内唯一，删实例级联 |
+| `model_provider_template` | 模板 `{id,name,default_name,protocol,protocols,base_url,host,custom,position}`；`protocols` 是逗号分隔的可用协议；由 `src/state/seed.ts` 的 SQL 在每次启动时 upsert，**不是 TS 常量** |
+| `model_provider` | 连接 `{id,template_id,name,protocol,base_url,stream,created_at,updated_at}`，**没有 api_key、没有 position**，列表按 `created_at,id` |
+| `model_provider_secret` | `{provider_id,api_key}`，主键即外键，删连接时级联删密钥 |
+| `model_provider_header` | `{provider_id,name,value}`，主键 `(provider_id,name)`，读时按名字排序——名字即身份，不需要顺序列 |
+| `model_provider_model` | `{provider_id,id,display_name,note,max_output_tokens,context_window,thinking,effort,budget,temperature,top_p,image,position}`，主键 `(provider_id,id)`，删连接级联 |
 | `agent` | `{id,title}` |
-| `app_state` | 键值：`current_session` / `active_instance` / `active_model` / `active_agent` / `draft` / `fts5` |
+| `app_state` | 键值：`current_session` / `active_provider` / `active_model` / `active_agent` / `draft` / `fts5` |
 
-- **迁移**：`PRAGMA user_version` 是唯一版本标记，`schema.ts` 的 `MIGRATIONS` 只追加、不改历史版本；每条迁移在一个事务里执行，失败回滚。启动时 `PRAGMA foreign_keys = ON`，并尝试 `journal_mode = WAL`（宿主不支持时只是回到默认日志模式，不致命）。
+- **迁移**：`PRAGMA user_version` 是唯一版本标记，`schema.ts` 的 `MIGRATIONS` 只追加、不改历史版本；每条迁移在一个事务里执行，失败回滚。v4 不迁移数据：先 DROP v3 的 `instance*` / `model_config` 与更早的 `provider*` / `model`，再建上述五张表，然后灌模板种子（幂等 upsert，每次启动都跑）。启动时 `PRAGMA foreign_keys = ON`，并尝试 `journal_mode = WAL`（宿主不支持时只是回到默认日志模式，不致命）。
 - **写库**：状态变化后 `sync.ts` 与「上次落库的状态」做 diff，只产生变化的行（一条流式 token = 1 条 message 更新 + 1 条 session 时间），300ms 防抖后**一个事务**提交；切后台/卸载强制 flush。写操作串行排队；失败时把 diff base 退回上一次成功点，下次重试（所有 op 都是幂等 upsert/delete）。
 - **中断回复修复保留**：读到 `status === "streaming"` 说明进程在生成中被回收 —— 空内容 → `error` + `生成已中断`，有内容 → `done`。
-- **模型目录**：`src/domain/service.ts` 的 `TEMPLATES` 只决定创建时的默认值、协议与分组，不是可管理实体；`requestModels` 打 `GET /models`（Anthropic 是 `/v1/models`）并当作连通性自检，拉到的 id 只作为候选，用户在候选面板里勾选后才以 `model` op 落库。
+- **模板不是常量**：`model_provider_template` 的行决定创建时的默认名称、默认地址、可用协议与首页分组顺序；代码里没有 `openai`/`deepseek` 之类的分支（`templateOf(templates, id)` 找不到就返回 `undefined`，UI 退到「其他」组，不做假模板兜底）。`requestModels` 打 `GET /models`（Anthropic 是 `/v1/models`）并当作连通性自检，拉到的 id 只作为候选，用户在候选面板里勾选后才以 `model` op 落库。
 - **FTS5**：`detectFts5()` 在 `temp` schema 建一张探测表再删掉，结果写 `app_state.fts5`（`"1"`/`"0"`）；P6 的搜索据此选 FTS5 或 `LIKE`，没有 FTS5 也能用。
 - 打开失败（宿主缺 `expo-sqlite` 桥）不阻塞聊天：本次运行退化为纯内存，只写一行日志。
 
@@ -85,7 +86,8 @@
 
 ## 7. 测试口径
 
-- `npm test` 跑 `node --experimental-strip-types scripts/check.ts`，当前 **146 条断言**，覆盖 reducer 全分支、三种协议的 SSE/请求体/端点拼装、错误分类、迁移与恢复（含实例/模型两层、密钥拆分、activeId 失效回落、协议约束）。存储层直接跑真 SQLite（`node:sqlite`，同一套 SQL 方言），不是 JSON 假件：迁移幂等、级联删除、流式 token 只改一行、中断回复修复都有断言。
+- `npm test` 跑 `node --experimental-strip-types scripts/check.ts`，当前 **153 条断言**，覆盖 reducer 全分支、三种协议的 SSE/请求体/端点拼装、错误分类、迁移与恢复（含模板种子、连接/模型两层、密钥拆分、activeId 失效回落、协议约束、v3 表已消失）。存储层直接跑真 SQLite（`node:sqlite`，同一套 SQL 方言），不是 JSON 假件：迁移幂等、级联删除、流式 token 只改一行、中断回复修复都有断言。
+- 模板断言用 `TEMPLATE_FIXTURE`（`scripts/check.ts`）与种子行双向对照：改种子不改 fixture 会红，改 fixture 不改种子也会红。
 - 断言用 `canon()` 规范化比较（键排序），不用裸 `JSON.stringify`——键序不该让测试变红。
 - 为了让 node 直接加载 ESM，`src/**` 的相对 import 一律写显式扩展名（`./x.ts` / `./x.tsx`），`tsconfig.json` 打开 `allowImportingTsExtensions`（配合 `noEmit`）。新增文件请沿用，否则 `npm test` 会报 `ERR_MODULE_NOT_FOUND`。
 - 纯模块才进测试；`useChat` 依赖 React，不在本机跑，真机验。
@@ -93,4 +95,4 @@
 
 ## 8. 现状与目标的差距
 
-本文描述的是**当前 app-only 形态**：会话与配置存 SQLite（§5）、agent 循环还没接（`src/api/turn.ts` 按实例协议请求三种接口，没有实例时走 `src/dev/mock.ts`）。`docs/implementation-plan.md` §4 的「service + SQLite + pi」是目标架构，尚未开工；两者不要混着引用。
+本文描述的是**当前 app-only 形态**：会话与配置存 SQLite（§5）、agent 循环还没接（`src/api/turn.ts` 按连接协议请求三种接口，没有连接时走 `src/dev/mock.ts`）。`docs/implementation-plan.md` §4 的「service + SQLite + pi」是目标架构，尚未开工；两者不要混着引用。

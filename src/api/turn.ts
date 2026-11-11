@@ -1,6 +1,6 @@
 import { logLine } from "../log.ts";
 import { runMock } from "../dev/mock.ts";
-import type { Endpoint } from "../domain/service.ts";
+import type { ChatEndpoint } from "../domain/provider.ts";
 import type { Message } from "../domain/types.ts";
 import { ChatFailure } from "./errors.ts";
 import { completionOf } from "./protocol.ts";
@@ -20,7 +20,7 @@ export interface TurnOptions {
  * `normalizeFailure` at the call site.
  */
 export async function runTurn(
-  endpoint: Endpoint | null,
+  endpoint: ChatEndpoint | null,
   messages: readonly Message[],
   { onDelta, signal }: TurnOptions,
 ): Promise<void> {
@@ -29,28 +29,28 @@ export async function runTurn(
     return;
   }
 
-  const { instance, model } = endpoint;
+  const { provider, model } = endpoint;
   await logLine(
-    `turn: ${instance.name}/${model.id} ${instance.protocol} stream=${instance.stream}`,
+    `turn: ${provider.name}/${model.id} ${provider.protocol} stream=${provider.stream}`,
   );
   try {
     const response = await requestChat(
       endpoint,
       messages,
-      instance.stream,
+      provider.stream,
       signal,
     );
-    if (instance.stream) {
+    if (provider.stream) {
       if (response.body === null) {
         throw new ChatFailure({ kind: "empty", detail: "响应没有 body" });
       }
       assertStreamNotEmpty(
-        await readDeltas(response.body, onDelta, instance.protocol, signal),
+        await readDeltas(response.body, onDelta, provider.protocol, signal),
       );
     } else {
       const text = await response.text();
       if (!signal.aborted) {
-        onDelta(completionOf(text, instance.protocol));
+        onDelta(completionOf(text, provider.protocol));
       }
     }
   } catch (thrown) {

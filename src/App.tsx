@@ -13,12 +13,12 @@ import {
   ignoreSafeArea,
 } from "@expo/ui/swift-ui/modifiers";
 
-import type { Instance, TemplateId } from "./domain/service.ts";
+import type { ModelProvider } from "./domain/provider.ts";
 import { ChatScreen } from "./screens/ChatScreen.tsx";
 import { SettingsPages } from "./screens/SettingsScreen.tsx";
 import { AgentPickerSheet } from "./shell/AgentPickerSheet.tsx";
 import { AgentSheet } from "./shell/AgentSheet.tsx";
-import { InstanceSheet } from "./shell/InstanceSheet.tsx";
+import { ProviderSheet } from "./shell/ProviderSheet.tsx";
 import { SessionListSheet, type SessionRow } from "./shell/SessionListSheet.tsx";
 import { useChat } from "./state/useChat.ts";
 import { installErrorCapture } from "./log.ts";
@@ -56,8 +56,10 @@ function Shell() {
   // list, and one more entry for each capability page below it.
   const [path, setPath] = useState<string[]>([]);
 
-  // Which template the creation sheet was opened from (null = closed).
-  const [createTemplate, setCreateTemplate] = useState<TemplateId | null>(null);
+  // Which template the creation sheet was opened from (null = closed). The
+  // id is resolved to a template row on the way out, so the sheet survives a
+  // seed change without holding a stale copy of the defaults.
+  const [createTemplateId, setCreateTemplateId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [agentForm, setAgentForm] = useState(false);
   const [agentPicker, setAgentPicker] = useState(false);
@@ -92,25 +94,34 @@ function Shell() {
     setPath([]);
   }, [actions]);
 
-  const startCreate = useCallback((templateId: TemplateId) => {
-    setCreateTemplate(templateId);
+  // The sheet needs the template row itself: defaults come from SQL, not code.
+  const startCreate = useCallback((templateId: string) => {
+    setCreateTemplateId(templateId);
     setCreateOpen(true);
   }, []);
   const closeCreate = useCallback(() => setCreateOpen(false), []);
-  const createInstance = useCallback(
-    (draft: Omit<Instance, "id">) => {
-      const id = actions.addInstance(draft);
+  const createProvider = useCallback(
+    (draft: Omit<ModelProvider, "id">) => {
+      const id = actions.addProvider(draft);
       setCreateOpen(false);
-      setPath(["settings", "modelService", `instance/${id}`]);
+      setPath(["settings", "providers", `providers/${id}`]);
     },
     [actions],
   );
-  const deleteInstance = useCallback(
-    (instance: Instance) => {
-      actions.removeInstance(instance.id);
-      setPath(["settings", "modelService"]);
+  const deleteProvider = useCallback(
+    (provider: ModelProvider) => {
+      actions.removeProvider(provider.id);
+      setPath(["settings", "providers"]);
     },
     [actions],
+  );
+
+  const createTemplateRow = useMemo(
+    () =>
+      createTemplateId === null
+        ? null
+        : (state.templates.find((item) => item.id === createTemplateId) ?? null),
+    [createTemplateId, state.templates],
   );
 
   const addAgent = useCallback(() => setAgentForm(true), []);
@@ -187,14 +198,15 @@ function Shell() {
           </ZStack>
 
           <SettingsPages
-            instances={state.instances}
+            templates={state.templates}
+            providers={state.providers}
             models={state.models}
             agents={state.agents}
             agentId={state.agentId}
             sessionCount={state.conversations.length}
             actions={actions}
-            onCreateInstance={startCreate}
-            onDeleteInstance={deleteInstance}
+            onCreateProvider={startCreate}
+            onDeleteProvider={deleteProvider}
             onAddAgent={addAgent}
             onDeleteAgent={actions.removeAgent}
             onSelectAgent={actions.selectAgent}
@@ -218,11 +230,11 @@ function Shell() {
         onDelete={actions.deleteSession}
       />
 
-      <InstanceSheet
+      <ProviderSheet
         visible={createOpen}
-        templateId={createTemplate}
+        template={createTemplateRow ?? null}
         onClose={closeCreate}
-        onCreate={createInstance}
+        onCreate={createProvider}
       />
 
       <AgentSheet

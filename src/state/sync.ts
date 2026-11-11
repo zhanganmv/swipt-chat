@@ -7,8 +7,8 @@
  * batches them into one transaction.
  */
 import type { ChatState } from "../domain/conversation.ts";
-import type { Instance, ModelConfig } from "../domain/service.ts";
-import { sameInstance, sameModelConfig } from "../domain/service.ts";
+import type { ModelProvider, ProviderModel } from "../domain/provider.ts";
+import { sameProvider, sameModel } from "../domain/provider.ts";
 import type { Message } from "../domain/types.ts";
 import type { StoreOp } from "./store.ts";
 
@@ -64,42 +64,41 @@ export function diffState(
     ops.push({ kind: "session.delete", id });
   }
 
-  const oldInstances = new Map(base.instances.map((item) => [item.id, item]));
-  for (let position = 0; position < next.instances.length; position += 1) {
-    const instance = next.instances[position];
-    const previous = oldInstances.get(instance.id);
-    oldInstances.delete(instance.id);
-    if (previous === undefined || !sameInstance(previous, instance)) {
-      ops.push({ kind: "instance", instance, position });
+  const oldProviders = new Map(base.providers.map((item) => [item.id, item]));
+  for (const provider of next.providers) {
+    const previous = oldProviders.get(provider.id);
+    oldProviders.delete(provider.id);
+    if (previous === undefined || !sameProvider(previous, provider)) {
+      ops.push({ kind: "provider", provider });
     }
   }
-  for (const id of oldInstances.keys()) {
-    ops.push({ kind: "instance.delete", id });
+  for (const id of oldProviders.keys()) {
+    ops.push({ kind: "provider.delete", id });
   }
 
-  for (const instanceId of Object.keys(next.models)) {
-    const models = next.models[instanceId];
-    const previous = base.models[instanceId] ?? [];
+  for (const providerId of Object.keys(next.models)) {
+    const models = next.models[providerId];
+    const previous = base.models[providerId] ?? [];
     for (let position = 0; position < models.length; position += 1) {
       const model = models[position];
       const existing = previous.find((item) => item.id === model.id);
-      if (existing === undefined || !sameModelConfig(existing, model)) {
-        ops.push({ kind: "model", instanceId, model, position });
+      if (existing === undefined || !sameModel(existing, model)) {
+        ops.push({ kind: "model", providerId, model, position });
       }
     }
     for (const model of previous) {
       if (!models.some((item) => item.id === model.id)) {
-        ops.push({ kind: "model.delete", instanceId, modelId: model.id });
+        ops.push({ kind: "model.delete", providerId, modelId: model.id });
       }
     }
   }
-  for (const instanceId of Object.keys(base.models)) {
-    if (next.models[instanceId] === undefined) {
-      // The instance is gone (or its models were cleared); `instance.delete`
+  for (const providerId of Object.keys(base.models)) {
+    if (next.models[providerId] === undefined) {
+      // The provider is gone (or its models were cleared); `provider.delete`
       // already cascades, so only an emptied list needs explicit deletes.
-      if (next.instances.some((item) => item.id === instanceId)) {
-        for (const model of base.models[instanceId]) {
-          ops.push({ kind: "model.delete", instanceId, modelId: model.id });
+      if (next.providers.some((item) => item.id === providerId)) {
+        for (const model of base.models[providerId]) {
+          ops.push({ kind: "model.delete", providerId, modelId: model.id });
         }
       }
     }
@@ -120,8 +119,8 @@ export function diffState(
   if (base.currentId !== next.currentId) {
     ops.push({ kind: "state", key: "current_session", value: next.currentId });
   }
-  if (base.instanceId !== next.instanceId) {
-    ops.push({ kind: "state", key: "active_instance", value: next.instanceId });
+  if (base.providerId !== next.providerId) {
+    ops.push({ kind: "state", key: "active_provider", value: next.providerId });
   }
   if (base.modelId !== next.modelId) {
     ops.push({ kind: "state", key: "active_model", value: next.modelId });

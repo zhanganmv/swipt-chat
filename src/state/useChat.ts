@@ -12,7 +12,7 @@ import {
   type ChatState,
 } from "../domain/conversation.ts";
 import { newId } from "../domain/ids.ts";
-import { modelNameOf, type Instance, type ModelConfig } from "../domain/service.ts";
+import { modelNameOf, type ModelProvider, type ProviderModel } from "../domain/provider.ts";
 import { titleOf } from "../domain/title.ts";
 import type { Agent, Message } from "../domain/types.ts";
 import { logLine } from "../log.ts";
@@ -45,21 +45,21 @@ export interface ChatActions {
   addAgent(title: string): void;
   removeAgent(id: string): void;
   /** Creates a connection and returns its id so the caller can push its page. */
-  addInstance(instance: Omit<Instance, "id">): string;
-  updateInstance(instance: Instance): void;
-  removeInstance(id: string): void;
-  selectInstance(id: string): void;
-  addModel(instanceId: string, model: ModelConfig): void;
-  updateModel(instanceId: string, model: ModelConfig): void;
-  removeModel(instanceId: string, modelId: string): void;
+  addProvider(provider: Omit<ModelProvider, "id">): string;
+  updateProvider(provider: ModelProvider): void;
+  removeProvider(id: string): void;
+  selectProvider(id: string): void;
+  addModel(providerId: string, model: ProviderModel): void;
+  updateModel(providerId: string, model: ProviderModel): void;
+  removeModel(providerId: string, modelId: string): void;
   selectModel(modelId: string): void;
   /**
-   * Lists the instance's models. Doubles as the connectivity probe: it throws a
+   * Lists the provider's models. Doubles as the connectivity probe: it throws a
    * classified failure when the address, key or protocol is wrong. Nothing is
    * persisted — the caller decides which candidates the user adds.
    */
-  fetchModels(instance: Instance): Promise<string[]>;
-  /** Reachability check with no instance involved; never throws. */
+  fetchModels(provider: ModelProvider): Promise<string[]>;
+  /** Reachability check with no provider involved; never throws. */
   selfTest(): Promise<string>;
 }
 
@@ -84,7 +84,11 @@ export interface UseChat {
  *   renders per second instead of 60 copies of the whole history.
  */
 export function useChat(): UseChat {
-  const [state, dispatch] = useReducer(reduce, DEFAULT_AGENTS, initialState);
+  // Templates live in the database (seeded on first launch), so the first
+  // render has none; `hydrate` below fills them in from the snapshot.
+  const [state, dispatch] = useReducer(reduce, DEFAULT_AGENTS, (agents) =>
+    initialState([], agents),
+  );
   const stateRef = useRef(state);
   stateRef.current = state;
 
@@ -157,8 +161,9 @@ export function useChat(): UseChat {
         conversations: snapshot?.conversations ?? [],
         currentId: snapshot?.currentId ?? null,
         draft: snapshot?.draft ?? "",
-        instances: snapshot?.instances ?? [],
-        instanceId: snapshot?.instanceId ?? null,
+        templates: snapshot?.templates ?? [],
+        providers: snapshot?.providers ?? [],
+        providerId: snapshot?.providerId ?? null,
         models: snapshot?.models ?? {},
         modelId: snapshot?.modelId ?? null,
         agents: snapshot?.agents ?? [],
@@ -355,47 +360,47 @@ export function useChat(): UseChat {
     dispatch({ type: "agentRemove", id });
   }, []);
 
-  const addInstance = useCallback((next: Omit<Instance, "id">): string => {
+  const addProvider = useCallback((next: Omit<ModelProvider, "id">): string => {
     const id = newId("i");
-    dispatch({ type: "instanceAdd", instance: { ...next, id } });
+    dispatch({ type: "providerAdd", provider: { ...next, id } });
     return id;
   }, []);
 
-  const updateInstance = useCallback((instance: Instance) => {
-    dispatch({ type: "instanceUpdate", instance });
+  const updateProvider = useCallback((provider: ModelProvider) => {
+    dispatch({ type: "providerUpdate", provider });
   }, []);
 
-  const removeInstance = useCallback((id: string) => {
-    dispatch({ type: "instanceRemove", id });
+  const removeProvider = useCallback((id: string) => {
+    dispatch({ type: "providerRemove", id });
   }, []);
 
-  const selectInstance = useCallback((id: string) => {
-    dispatch({ type: "instanceSelect", id });
+  const selectProvider = useCallback((id: string) => {
+    dispatch({ type: "providerSelect", id });
   }, []);
 
-  const addModel = useCallback((instanceId: string, model: ModelConfig) => {
-    dispatch({ type: "modelAdd", instanceId, model });
+  const addModel = useCallback((providerId: string, model: ProviderModel) => {
+    dispatch({ type: "modelAdd", providerId, model });
   }, []);
 
-  const updateModel = useCallback((instanceId: string, model: ModelConfig) => {
-    dispatch({ type: "modelUpdate", instanceId, model });
+  const updateModel = useCallback((providerId: string, model: ProviderModel) => {
+    dispatch({ type: "modelUpdate", providerId, model });
   }, []);
 
-  const removeModel = useCallback((instanceId: string, modelId: string) => {
-    dispatch({ type: "modelRemove", instanceId, modelId });
+  const removeModel = useCallback((providerId: string, modelId: string) => {
+    dispatch({ type: "modelRemove", providerId, modelId });
   }, []);
 
   const selectModel = useCallback((modelId: string) => {
     dispatch({ type: "modelSelect", modelId });
   }, []);
 
-  const fetchModels = useCallback(async (instance: Instance): Promise<string[]> => {
+  const fetchModels = useCallback(async (provider: ModelProvider): Promise<string[]> => {
     try {
       void logLine(
-        `models: start ${instance.protocol} ${instance.baseURL} key=${instance.apiKey.length} chars`,
+        `models: start ${provider.protocol} ${provider.baseURL} key=${provider.apiKey.length} chars`,
       );
-      const ids = await requestModels(instance, undefined);
-      void logLine(`models: ${instance.baseURL} ${ids.length}`);
+      const ids = await requestModels(provider, undefined);
+      void logLine(`models: ${provider.baseURL} ${ids.length}`);
       return ids;
     } catch (error) {
       void logLine(`models: failed ${technicalOf(error)}`);
@@ -422,10 +427,10 @@ export function useChat(): UseChat {
       selectAgent,
       addAgent,
       removeAgent,
-      addInstance,
-      updateInstance,
-      removeInstance,
-      selectInstance,
+      addProvider,
+      updateProvider,
+      removeProvider,
+      selectProvider,
       addModel,
       updateModel,
       removeModel,
@@ -435,24 +440,24 @@ export function useChat(): UseChat {
     }),
     [
       addAgent,
-      addInstance,
+      addProvider,
       addModel,
       deleteSession,
       fetchModels,
       newChat,
       openSession,
       removeAgent,
-      removeInstance,
+      removeProvider,
       removeModel,
       renameSession,
       selectAgent,
-      selectInstance,
+      selectProvider,
       selectModel,
       selfTest,
       send,
       setDraft,
       setSheetOpen,
-      updateInstance,
+      updateProvider,
       updateModel,
       stop,
     ],

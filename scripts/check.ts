@@ -7,7 +7,7 @@ import {
   EMPTY_MESSAGES,
   endpointOf,
   initialState,
-  instanceOf,
+  providerOf,
   messagesOf,
   reduce,
   type ChatState,
@@ -16,12 +16,11 @@ import { newId } from "../src/domain/ids.ts";
 import { titleOf } from "../src/domain/title.ts";
 import {
   PROTOCOL_LABEL,
-  TEMPLATES,
   baseURLError,
   duplicateHeader,
   hostOf,
   modelCountLabel,
-  newInstance,
+  newProvider,
   newModel,
   newThinking,
   protocolEditable,
@@ -29,11 +28,12 @@ import {
   proxyHostOf,
   templateOf,
   thinkingError,
-  type Endpoint,
-  type Instance,
-  type ModelConfig,
+  type ChatEndpoint,
+  type ModelProvider,
+  type ModelProviderTemplate,
+  type ProviderModel,
   type Protocol,
-} from "../src/domain/service.ts";
+} from "../src/domain/provider.ts";
 import {
   ChatFailure,
   describeFailure,
@@ -102,6 +102,54 @@ const throws = (name: string, run: () => unknown, expected: string) => {
   }
 };
 
+/**
+ * What the seed SQL is expected to produce, in group order. The database test
+ * below compares the seeded rows against this, so a change to one without the
+ * other fails here rather than on the phone.
+ */
+const TEMPLATE_FIXTURE: ModelProviderTemplate[] = [
+  {
+    id: "openai",
+    name: "OpenAI",
+    defaultName: "OpenAI",
+    baseURL: "https://api.openai.com/v1",
+    host: "api.openai.com",
+    protocol: "openai-chat",
+    protocols: ["openai-chat", "openai-responses"],
+    custom: false,
+  },
+  {
+    id: "anthropic",
+    name: "Anthropic",
+    defaultName: "Anthropic",
+    baseURL: "https://api.anthropic.com",
+    host: "api.anthropic.com",
+    protocol: "anthropic-messages",
+    protocols: ["anthropic-messages"],
+    custom: false,
+  },
+  {
+    id: "deepseek",
+    name: "DeepSeek",
+    defaultName: "DeepSeek",
+    baseURL: "https://api.deepseek.com/v1",
+    host: "api.deepseek.com",
+    protocol: "openai-chat",
+    protocols: ["openai-chat"],
+    custom: false,
+  },
+  {
+    id: "custom",
+    name: "自定义",
+    defaultName: "",
+    baseURL: "",
+    host: "",
+    protocol: "openai-chat",
+    protocols: ["openai-chat", "openai-responses", "anthropic-messages"],
+    custom: true,
+  },
+];
+
 // ---------------------------------------------------------------- SSE / UTF-8
 check(
   "delta",
@@ -140,7 +188,7 @@ const begin = (state: ChatState, text: string, create: boolean): ChatState =>
     at: 1000,
   });
 
-const created = begin(initialState(AGENTS), "  你好\n世界  ", true);
+const created = begin(initialState([], AGENTS), "  你好\n世界  ", true);
 check("begin: one conversation", created.conversations.length, 1);
 check("begin: selected", created.currentId, "c1");
 check("begin: two messages", created.conversations[0].messages.length, 2);
@@ -193,7 +241,7 @@ const ended = reduce(streamed, {
 check("end: message done", ended.conversations[0].messages[1].status, "done");
 check("end: turn cleared", ended.turn, null);
 
-const failedTurn = reduce(begin(initialState(AGENTS), "hi", true), {
+const failedTurn = reduce(begin(initialState([], AGENTS), "hi", true), {
   type: "end",
   conversationId: "c1",
   messageId: "a1",
@@ -208,7 +256,7 @@ check(
 );
 check("error: turn cleared", failedTurn.turn, null);
 
-const stopped = reduce(begin(initialState(AGENTS), "hi", true), {
+const stopped = reduce(begin(initialState([], AGENTS), "hi", true), {
   type: "stop",
   conversationId: "c1",
   messageId: "a1",
@@ -222,7 +270,7 @@ check("stop: reason", stopped.conversations[0].messages[1].error, "已停止生�
 check("stop: turn cleared", stopped.turn, null);
 
 const partial = reduce(
-  reduce(begin(initialState(AGENTS), "hi", true), {
+  reduce(begin(initialState([], AGENTS), "hi", true), {
     type: "delta",
     conversationId: "c1",
     messageId: "a1",
@@ -242,7 +290,7 @@ check("begin: appends", continued.conversations.length, 1);
 check("begin: appended count", continued.conversations[0].messages.length, 4);
 check(
   "begin: unknown conversation is a no-op",
-  begin(begin(initialState(AGENTS), "hi", true), "x", false).currentId,
+  begin(begin(initialState([], AGENTS), "hi", true), "x", false).currentId,
   "c1",
 );
 
@@ -279,12 +327,12 @@ check(
 
 check(
   "messagesOf: empty conversation",
-  messagesOf(initialState(AGENTS)),
+  messagesOf(initialState([], AGENTS)),
   EMPTY_MESSAGES,
 );
 check(
   "messagesOf: stable empty reference",
-  messagesOf(initialState(AGENTS)) === EMPTY_MESSAGES,
+  messagesOf(initialState([], AGENTS)) === EMPTY_MESSAGES,
   true,
 );
 check("messagesOf: current messages", messagesOf(selected).length, 2);
@@ -298,8 +346,8 @@ check(
   reduce(selected, { type: "draft", text: selected.draft }) === selected,
   true,
 );
-// ------------------------------------------------------- instance/model lists
-const inst1: Instance = {
+// ------------------------------------------------------- provider/model lists
+const inst1: ModelProvider = {
   id: "p1",
   templateId: "custom",
   name: "一",
@@ -309,66 +357,66 @@ const inst1: Instance = {
   stream: true,
   headers: [],
 };
-const inst2: Instance = { ...inst1, id: "p2", name: "二", baseURL: "https://b/v1" };
+const inst2: ModelProvider = { ...inst1, id: "p2", name: "二", baseURL: "https://b/v1" };
 const modelA = newModel("mA");
 const modelB = newModel("mB");
 
-const withInstances = reduce(initialState(AGENTS), {
-  type: "instanceAdd",
-  instance: inst1,
+const withInstances = reduce(initialState([], AGENTS), {
+  type: "providerAdd",
+  provider: inst1,
 });
-check("instances: first add becomes active", withInstances.instanceId, "p1");
-const secondInstance = reduce(withInstances, { type: "instanceAdd", instance: inst2 });
+check("providers: first add becomes active", withInstances.providerId, "p1");
+const secondInstance = reduce(withInstances, { type: "providerAdd", provider: inst2 });
 check(
-  "instances: adding does not steal the active one",
-  secondInstance.instanceId,
+  "providers: adding does not steal the active one",
+  secondInstance.providerId,
   "p1",
 );
 check(
-  "instances: select",
-  reduce(secondInstance, { type: "instanceSelect", id: "p2" }).instanceId,
+  "providers: select",
+  reduce(secondInstance, { type: "providerSelect", id: "p2" }).providerId,
   "p2",
 );
 check(
-  "instances: select unknown is a no-op",
-  reduce(secondInstance, { type: "instanceSelect", id: "nope" }) === secondInstance,
+  "providers: select unknown is a no-op",
+  reduce(secondInstance, { type: "providerSelect", id: "nope" }) === secondInstance,
   true,
 );
 check(
-  "instances: update replaces in place",
+  "providers: update replaces in place",
   reduce(secondInstance, {
-    type: "instanceUpdate",
-    instance: { ...inst1, name: "改" },
-  }).instances[0]?.name,
+    type: "providerUpdate",
+    provider: { ...inst1, name: "改" },
+  }).providers[0]?.name,
   "改",
 );
 
 const withModel = reduce(secondInstance, {
   type: "modelAdd",
-  instanceId: "p1",
+  providerId: "p1",
   model: modelA,
 });
-check("models: added under its instance", withModel.models.p1?.length, 1);
+check("models: added under its provider", withModel.models.p1?.length, 1);
 check("models: first model becomes the active model", withModel.modelId, "mA");
-check("models: endpoint pairs instance and model", endpointOf(withModel), {
-  instance: inst1,
+check("models: endpoint pairs provider and model", endpointOf(withModel), {
+  provider: inst1,
   model: modelA,
 });
 check(
-  "models: instanceOf follows the selection",
-  instanceOf(withModel, "p1")?.name,
+  "models: providerOf follows the selection",
+  providerOf(withModel, "p1")?.name,
   "一",
 );
 check(
-  "instances: removing the active one falls back",
-  reduce(secondInstance, { type: "instanceRemove", id: "p2" }).instanceId,
+  "providers: removing the active one falls back",
+  reduce(secondInstance, { type: "providerRemove", id: "p2" }).providerId,
   "p1",
 );
 check(
-  "instances: removing drops its models",
+  "providers: removing drops its models",
   reduce(
-    reduce(withModel, { type: "modelAdd", instanceId: "p2", model: modelB }),
-    { type: "instanceRemove", id: "p2" },
+    reduce(withModel, { type: "modelAdd", providerId: "p2", model: modelB }),
+    { type: "providerRemove", id: "p2" },
   ).models,
   { p1: [modelA] },
 );
@@ -377,7 +425,7 @@ check(
   reduce(withModel, { type: "modelSelect", modelId: "nope" }) === withModel,
   true,
 );
-check("instances: none configured is the mock", endpointOf(initialState(AGENTS)), null);
+check("providers: none configured is the mock", endpointOf(initialState([], AGENTS)), null);
 
 const withAgent = reduce(selected, {
   type: "agentAdd",
@@ -396,28 +444,42 @@ check(
 check("ids: unique", newId("c") === newId("c"), false);
 
 // --------------------------------------------------------------- templates
-check("template: vendor", templateOf("openai").vendor, "OpenAI");
 check(
-  "template: deepseek base url",
-  templateOf("deepseek").defaultBaseURL,
+  "template: seed order is the home-page group order",
+  TEMPLATE_FIXTURE.map((item) => item.id),
+  ["openai", "anthropic", "deepseek", "custom"],
+);
+check(
+  "template: lookup by row id",
+  templateOf(TEMPLATE_FIXTURE, "openai")?.name,
+  "OpenAI",
+);
+check("template: an unknown id has no row", templateOf(TEMPLATE_FIXTURE, "gone"), undefined);
+check(
+  "template: deepseek default base url",
+  templateOf(TEMPLATE_FIXTURE, "deepseek")?.baseURL,
   "https://api.deepseek.com/v1",
 );
 check(
   "template: anthropic is messages-only",
-  templateOf("anthropic").protocols,
+  templateOf(TEMPLATE_FIXTURE, "anthropic")?.protocols,
   ["anthropic-messages"],
 );
-check("template: custom offers every protocol", templateOf("custom").protocols.length, 3);
 check(
-  "template: only openai and custom allow a protocol switch",
-  [
-    protocolEditable({ ...inst1, templateId: "openai" }),
-    protocolEditable({ ...inst1, templateId: "anthropic" }),
-    protocolEditable(inst1),
-  ],
-  [true, false, true],
+  "template: custom offers every protocol",
+  templateOf(TEMPLATE_FIXTURE, "custom")?.protocols.length,
+  3,
 );
-check("template: vendor is what the form titles", TEMPLATES[0].vendor, "OpenAI");
+check(
+  "template: only multi-protocol families allow a switch",
+  [
+    protocolEditable(TEMPLATE_FIXTURE, { ...inst1, templateId: "openai" }),
+    protocolEditable(TEMPLATE_FIXTURE, { ...inst1, templateId: "deepseek" }),
+    protocolEditable(TEMPLATE_FIXTURE, { ...inst1, templateId: "custom" }),
+    protocolEditable(TEMPLATE_FIXTURE, { ...inst1, templateId: "gone" }),
+  ],
+  [true, false, true, false],
+);
 
 check(
   "url: host ignores userinfo, port and case",
@@ -427,17 +489,25 @@ check(
 check("url: host of junk", hostOf("nope"), "");
 check(
   "url: a proxy shows its host as the row subtitle",
-  proxyHostOf({ ...inst1, templateId: "openai", baseURL: "https://proxy.example.com/v1" }),
+  proxyHostOf(TEMPLATE_FIXTURE, {
+    ...inst1,
+    templateId: "openai",
+    baseURL: "https://proxy.example.com/v1",
+  }),
   "proxy.example.com",
 );
 check(
   "url: the official host is not a subtitle",
-  proxyHostOf({ ...inst1, templateId: "openai", baseURL: "https://api.openai.com/v1" }),
+  proxyHostOf(TEMPLATE_FIXTURE, {
+    ...inst1,
+    templateId: "openai",
+    baseURL: "https://api.openai.com/v1",
+  }),
   "",
 );
 check("url: invalid is rejected", baseURLError("api.openai.com"), "请输入有效的 URL");
 check("url: valid passes", baseURLError("https://api.openai.com/v1"), null);
-check("name: empty is rejected", newInstance({ templateId: "custom", name: "  ", protocol: "openai-chat", baseURL: "https://a/v1", apiKey: "" }).name, "");
+check("name: empty is rejected", newProvider({ templateId: "custom", name: "  ", protocol: "openai-chat", baseURL: "https://a/v1", apiKey: "" }).name, "");
 check("count: none", modelCountLabel(0), "未添加模型");
 check("count: some", modelCountLabel(3), "3 个模型");
 check(
@@ -509,7 +579,7 @@ check(
 );
 
 // ----------------------------------------------------------------- wire format
-const inst: Instance = {
+const inst: ModelProvider = {
   id: "i1",
   templateId: "custom",
   name: "示例服务",
@@ -520,8 +590,8 @@ const inst: Instance = {
   headers: [{ name: "X-Test", value: "1" }],
 };
 const mdl = newModel("m");
-const ep: Endpoint = { instance: inst, model: mdl };
-const anthropic: Instance = {
+const ep: ChatEndpoint = { provider: inst, model: mdl };
+const anthropic: ModelProvider = {
   ...inst,
   protocol: "anthropic-messages",
   baseURL: "https://api.anthropic.com",
@@ -620,7 +690,7 @@ check(
     messages: [{ role: "user", content: "hi" }],
   },
 );
-const thinkingModel: ModelConfig = {
+const thinkingModel: ProviderModel = {
   ...mdl,
   maxOutputTokens: 4096,
   thinking: { enabled: true, effort: null, budget: 2048 },
@@ -753,7 +823,52 @@ const sqlite = async (): Promise<SqlDriver> => {
 const db = await sqlite();
 check("db: migration lands the schema version", await migrate(db), SCHEMA_VERSION);
 check("db: migration is idempotent", await migrate(db), SCHEMA_VERSION);
-check("db: a fresh database is empty", await loadSnapshot(db), emptySnapshot());
+check(
+  "db: a fresh database has the templates and nothing else",
+  await loadSnapshot(db),
+  { ...emptySnapshot(), templates: TEMPLATE_FIXTURE } satisfies Snapshot,
+);
+check(
+  "db: the seed is what the fixture says it is",
+  (await loadSnapshot(db)).templates,
+  TEMPLATE_FIXTURE,
+);
+check(
+  "db: the seed is an upsert, not a second copy",
+  (await db.first<{ n: number }>("SELECT count(*) AS n FROM model_provider_template"))
+    ?.n,
+  4,
+);
+check(
+  "db: a provider has no position column",
+  (await db.all<{ name: string }>("PRAGMA table_info(model_provider)")).map(
+    (column) => column.name,
+  ),
+  ["id", "template_id", "name", "protocol", "base_url", "stream", "created_at", "updated_at"],
+);
+check(
+  "db: a header is keyed by name, not by position",
+  (await db.all<{ name: string }>("PRAGMA table_info(model_provider_header)")).map(
+    (column) => column.name,
+  ),
+  ["provider_id", "name", "value"],
+);
+check(
+  "db: v3 tables are gone",
+  (await db.all<{ name: string }>(
+    `SELECT name FROM sqlite_master
+     WHERE type = 'table' AND name IN ('instance', 'instance_secret', 'instance_header',
+                                       'model_config', 'provider', 'provider_secret')`,
+  )).map((row) => row.name),
+  [],
+);
+check(
+  "db: models are ordered by position",
+  (await db.all<{ name: string }>(
+    "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'model_provider_model_order'",
+  )).map((row) => row.name),
+  ["model_provider_model_order"],
+);
 check("db: fts5 probe answers", typeof (await detectFts5(db)), "boolean");
 check(
   "db: fts5 probe leaves no table behind",
@@ -778,8 +893,9 @@ const chat: ChatState = {
   ],
   currentId: "c1",
   draft: "草稿",
-  instances: [inst],
-  instanceId: "i1",
+  templates: TEMPLATE_FIXTURE,
+  providers: [inst],
+  providerId: "i1",
   models: { i1: [mdl] },
   modelId: "m",
   agents: [{ id: "default", title: "Swipt Chat" }],
@@ -792,11 +908,11 @@ const seed: StoreOp[] = [
   { kind: "session", id: "c1", title: "对话", updatedAt: 5 },
   { kind: "message", sessionId: "c1", seq: 0, message: chat.conversations[0].messages[0] },
   { kind: "message", sessionId: "c1", seq: 1, message: chat.conversations[0].messages[1] },
-  { kind: "instance", instance: inst, position: 0 },
-  { kind: "model", instanceId: "i1", model: mdl, position: 0 },
+  { kind: "provider", provider: inst },
+  { kind: "model", providerId: "i1", model: mdl, position: 0 },
   { kind: "agent", agent: { id: "default", title: "Swipt Chat" } },
   { kind: "state", key: "current_session", value: "c1" },
-  { kind: "state", key: "active_instance", value: "i1" },
+  { kind: "state", key: "active_provider", value: "i1" },
   { kind: "state", key: "active_model", value: "m" },
   { kind: "state", key: "active_agent", value: "default" },
   { kind: "state", key: "draft", value: "草稿" },
@@ -806,8 +922,9 @@ check("db: round-trip through rows", await loadSnapshot(db), {
   conversations: chat.conversations,
   currentId: "c1",
   draft: "草稿",
-  instances: [inst],
-  instanceId: "i1",
+  templates: TEMPLATE_FIXTURE,
+  providers: [inst],
+  providerId: "i1",
   models: { i1: [mdl] },
   modelId: "m",
   agents: chat.agents,
@@ -815,8 +932,8 @@ check("db: round-trip through rows", await loadSnapshot(db), {
 } satisfies Snapshot);
 
 check(
-  "db: api key is not a column of instance",
-  (await db.all<{ name: string }>("PRAGMA table_info(instance)")).some(
+  "db: api key is not a column of provider",
+  (await db.all<{ name: string }>("PRAGMA table_info(model_provider)")).some(
     (column) => column.name === "api_key",
   ),
   false,
@@ -824,18 +941,18 @@ check(
 check(
   "db: api key lives in its own table",
   (await db.first<{ api_key: string }>(
-    "SELECT api_key FROM instance_secret WHERE instance_id = ?",
+    "SELECT api_key FROM model_provider_secret WHERE provider_id = ?",
     ["i1"],
   ))?.api_key,
   "sk-1",
 );
 check(
-  "db: custom headers keep their order",
+  "db: custom headers are read back by name",
   (await db.first<{ name: string; value: string }>(
-    "SELECT name, value FROM instance_header WHERE instance_id = ?",
+    "SELECT name, value FROM model_provider_header WHERE provider_id = ?",
     ["i1"],
-  ))?.name,
-  "X-Test",
+  )),
+  { name: "X-Test", value: "1" },
 );
 
 // The whole point of the rewrite: a streamed token changes exactly one row.
@@ -909,15 +1026,15 @@ check(
 check("db: stale current session falls back", (await loadSnapshot(db)).currentId, null);
 
 check(
-  "db: stale active instance falls back to the first connection",
+  "db: stale active provider falls back to the first connection",
   (await applyOps(db, [
-    { kind: "state", key: "active_instance", value: "gone" },
+    { kind: "state", key: "active_provider", value: "gone" },
   ])),
   undefined,
 );
-check("db: active instance fallback", (await loadSnapshot(db)).instanceId, "i1");
+check("db: active provider fallback", (await loadSnapshot(db)).providerId, "i1");
 check(
-  "db: stale active model falls back to the instance's first model",
+  "db: stale active model falls back to the provider's first model",
   (await applyOps(db, [{ kind: "state", key: "active_model", value: "gone" }])),
   undefined,
 );
@@ -937,11 +1054,11 @@ check(
 
 // ------------------------------------------------------------ model configs
 await applyOps(db, [
-  { kind: "model", instanceId: "i1", model: { ...mdl, displayName: "改名" }, position: 0 },
+  { kind: "model", providerId: "i1", model: { ...mdl, displayName: "改名" }, position: 0 },
 ]);
 check(
   "db: editing a model upserts instead of duplicating",
-  (await db.first<{ n: number }>("SELECT count(*) AS n FROM model_config"))?.n,
+  (await db.first<{ n: number }>("SELECT count(*) AS n FROM model_provider_model"))?.n,
   1,
 );
 check(
@@ -968,7 +1085,7 @@ check(
 
 const withRenamed = reduce(chat, {
   type: "modelUpdate",
-  instanceId: "i1",
+  providerId: "i1",
   model: { ...mdl, displayName: "改名" },
 });
 check("state: a model is edited in place", withRenamed.models.i1[0].displayName, "改名");
@@ -976,34 +1093,34 @@ check(
   "state: the same model twice is not a new state",
   reduce(withRenamed, {
     type: "modelUpdate",
-    instanceId: "i1",
+    providerId: "i1",
     model: { ...mdl, displayName: "改名" },
   }) === withRenamed,
   true,
 );
 check(
   "state: removing a connection drops its models",
-  reduce(withRenamed, { type: "instanceRemove", id: "i1" }).models,
+  reduce(withRenamed, { type: "providerRemove", id: "i1" }).models,
   {},
 );
 
-await applyOps(db, [{ kind: "instance.delete", id: "i1" }]);
+await applyOps(db, [{ kind: "provider.delete", id: "i1" }]);
 check(
   "db: deleting a connection drops its models",
-  (await db.first<{ n: number }>("SELECT count(*) AS n FROM model_config"))?.n,
+  (await db.first<{ n: number }>("SELECT count(*) AS n FROM model_provider_model"))?.n,
   0,
 );
 check(
   "db: deleting a connection drops its key",
   (await db.first<{ n: number }>(
-    "SELECT count(*) AS n FROM instance_secret",
+    "SELECT count(*) AS n FROM model_provider_secret",
   ))?.n,
   0,
 );
 check(
   "db: deleting a connection drops its headers",
   (await db.first<{ n: number }>(
-    "SELECT count(*) AS n FROM instance_header",
+    "SELECT count(*) AS n FROM model_provider_header",
   ))?.n,
   0,
 );

@@ -1,9 +1,9 @@
 import { ChatFailure } from "./errors.ts";
-import type { Instance, ModelConfig, Protocol } from "../domain/service.ts";
+import type { ModelProvider, ProviderModel, Protocol } from "../domain/provider.ts";
 import type { Message } from "../domain/types.ts";
 
 /**
- * The wire format of the three protocols an instance can speak.
+ * The wire format of the three protocols a provider can speak.
  *
  * Pure on purpose: the one `Client.fetch` call lives in `request.ts`, so these
  * rules stay testable outside the Swipt host.
@@ -12,47 +12,47 @@ import type { Message } from "../domain/types.ts";
 const trimURL = (value: string): string => value.replace(/\/+$/, "");
 
 /** Where a reply is posted. */
-export function chatEndpointOf(instance: Instance): string {
-  switch (instance.protocol) {
+export function chatEndpointOf(provider: ModelProvider): string {
+  switch (provider.protocol) {
     case "openai-chat":
-      return `${trimURL(instance.baseURL)}/chat/completions`;
+      return `${trimURL(provider.baseURL)}/chat/completions`;
     case "openai-responses":
-      return `${trimURL(instance.baseURL)}/responses`;
+      return `${trimURL(provider.baseURL)}/responses`;
     case "anthropic-messages":
-      return `${trimURL(instance.baseURL)}/v1/messages`;
+      return `${trimURL(provider.baseURL)}/v1/messages`;
   }
 }
 
 /** Where the model catalogue lives; also the connectivity probe. */
-export function modelsEndpointOf(instance: Instance): string {
-  return instance.protocol === "anthropic-messages"
-    ? `${trimURL(instance.baseURL)}/v1/models`
-    : `${trimURL(instance.baseURL)}/models`;
+export function modelsEndpointOf(provider: ModelProvider): string {
+  return provider.protocol === "anthropic-messages"
+    ? `${trimURL(provider.baseURL)}/v1/models`
+    : `${trimURL(provider.baseURL)}/models`;
 }
 
 /** Headers the protocol injects on its own. */
-export function autoHeadersOf(instance: Instance): Record<string, string> {
-  if (instance.protocol === "anthropic-messages") {
+export function autoHeadersOf(provider: ModelProvider): Record<string, string> {
+  if (provider.protocol === "anthropic-messages") {
     return {
       "content-type": "application/json",
-      "x-api-key": instance.apiKey,
+      "x-api-key": provider.apiKey,
       "anthropic-version": "2023-06-01",
     };
   }
   return {
     "content-type": "application/json",
-    authorization: `Bearer ${instance.apiKey}`,
+    authorization: `Bearer ${provider.apiKey}`,
   };
 }
 
 /**
- * Auto headers plus the instance's own. A user header overrides an auto one
+ * Auto headers plus the provider's own. A user header overrides an auto one
  * with the same name regardless of case — that is the documented escape hatch
  * for a proxy that needs a different `anthropic-version`.
  */
-export function headersOf(instance: Instance): Record<string, string> {
-  const headers = autoHeadersOf(instance);
-  for (const header of instance.headers) {
+export function headersOf(provider: ModelProvider): Record<string, string> {
+  const headers = autoHeadersOf(provider);
+  for (const header of provider.headers) {
     const name = header.name.trim();
     if (name === "") {
       continue;
@@ -67,7 +67,7 @@ export function headersOf(instance: Instance): Record<string, string> {
   return headers;
 }
 
-function samplingOf(model: ModelConfig): Record<string, number> {
+function samplingOf(model: ProviderModel): Record<string, number> {
   const body: Record<string, number> = {};
   if (model.temperature !== null) {
     body.temperature = model.temperature;
@@ -80,14 +80,14 @@ function samplingOf(model: ModelConfig): Record<string, number> {
 
 /** Request body of one turn. */
 export function bodyOf(
-  instance: Instance,
-  model: ModelConfig,
+  provider: ModelProvider,
+  model: ProviderModel,
   messages: readonly Message[],
   stream: boolean,
 ): string {
   const turns = messages.map(({ role, content }) => ({ role, content }));
 
-  switch (instance.protocol) {
+  switch (provider.protocol) {
     case "openai-chat": {
       const body: Record<string, unknown> = {
         model: model.id,

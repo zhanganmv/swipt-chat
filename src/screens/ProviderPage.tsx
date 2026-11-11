@@ -36,33 +36,35 @@ import {
 import { describeFailure, normalizeFailure, technicalOf } from "../api/errors.ts";
 import {
   PROTOCOL_LABEL,
-  TEMPLATES,
+  PROTOCOLS,
   baseURLError,
   duplicateHeader,
   isValidURL,
   modelCountLabel,
   protocolEditable,
-  type Header,
-  type Instance,
+  type RequestHeader,
+  type ModelProvider,
+  type ModelProviderTemplate,
   templateOf,
-  type ModelConfig,
+  type ProviderModel,
   type Protocol,
-} from "../domain/service.ts";
+} from "../domain/provider.ts";
 import { useTheme } from "../theme/index.tsx";
 import { CandidateSheet } from "../shell/CandidateSheet.tsx";
 import { ModelSheet } from "../shell/ModelSheet.tsx";
 import { FieldError, Footer, Muted } from "./parts.tsx";
 
 /**
- * 实例详情: connection fields, model list, custom headers, delete.
+ * 连接详情: connection fields, model list, custom headers, delete.
  *
  * No global 保存 button — every edit lands in the state immediately and the
  * chat hook's 300ms debounce writes it to SQLite. 获取模型 and 手动添加模型 are
  * explicit actions, and a fetched catalogue only ever becomes *candidates*:
  * it never adds, removes or reorders what the user already configured.
  */
-export function InstancePage({
-  instance,
+export function ProviderPage({
+  templates,
+  provider,
   models,
   onUpdate,
   onDelete,
@@ -71,36 +73,37 @@ export function InstancePage({
   onAddModel,
   onDeleteModel,
 }: {
-  instance: Instance;
-  models: readonly ModelConfig[];
-  onUpdate: (instance: Instance) => void;
-  onDelete: (instance: Instance) => void;
-  onFetchModels: (instance: Instance) => Promise<string[]>;
-  onAddModels: (instanceId: string, ids: readonly string[]) => void;
-  onAddModel: (instanceId: string, model: ModelConfig) => void;
-  onDeleteModel: (instanceId: string, modelId: string) => void;
+  templates: readonly ModelProviderTemplate[];
+  provider: ModelProvider;
+  models: readonly ProviderModel[];
+  onUpdate: (provider: ModelProvider) => void;
+  onDelete: (provider: ModelProvider) => void;
+  onFetchModels: (provider: ModelProvider) => Promise<string[]>;
+  onAddModels: (providerId: string, ids: readonly string[]) => void;
+  onAddModel: (providerId: string, model: ProviderModel) => void;
+  onDeleteModel: (providerId: string, modelId: string) => void;
 }) {
   const { colors } = useTheme();
-  const template = templateOf(instance.templateId);
-  const custom = instance.templateId === "custom";
+  const template = templateOf(templates, provider.templateId);
+  const custom = template?.custom ?? false;
 
-  const [name, setName] = useState(instance.name);
-  const [baseURL, setBaseURL] = useState(instance.baseURL);
+  const [name, setName] = useState(provider.name);
+  const [baseURL, setBaseURL] = useState(provider.baseURL);
   const [fetching, setFetching] = useState(false);
   const [candidates, setCandidates] = useState<string[] | null>(null);
   const [candidateOpen, setCandidateOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
 
-  const nameText = useNativeState(instance.name);
-  const baseText = useNativeState(instance.baseURL);
+  const nameText = useNativeState(provider.name);
+  const baseText = useNativeState(provider.baseURL);
   const keyText = useNativeState("");
 
   const urlError = baseURLError(baseURL);
 
-  const patch = (next: Partial<Instance>) => onUpdate({ ...instance, ...next });
+  const patch = (next: Partial<ModelProvider>) => onUpdate({ ...provider, ...next });
 
   const changeProtocol = (protocol: Protocol) => {
-    if (protocol === instance.protocol) {
+    if (protocol === provider.protocol) {
       return;
     }
     if (models.length === 0) {
@@ -125,7 +128,7 @@ export function InstancePage({
     }
     setFetching(true);
     try {
-      const ids = await onFetchModels(instance);
+      const ids = await onFetchModels(provider);
       setCandidates(ids);
       setCandidateOpen(true);
     } catch (error) {
@@ -135,7 +138,7 @@ export function InstancePage({
     }
   };
 
-  const keyReady = instance.apiKey.trim() !== "";
+  const keyReady = provider.apiKey.trim() !== "";
 
   return (
     <>
@@ -143,7 +146,7 @@ export function InstancePage({
         <List
           modifiers={[
             listStyle("insetGrouped"),
-            navigationTitle(instance.name),
+            navigationTitle(provider.name),
             navigationBarTitleDisplayMode("inline"),
           ]}
         >
@@ -161,7 +164,7 @@ export function InstancePage({
           >
             <TextField
               text={nameText}
-              placeholder="实例名称"
+              placeholder="连接名称"
               onTextChange={(next) => {
                 setName(next);
                 patch({ name: next });
@@ -170,17 +173,15 @@ export function InstancePage({
             <Text
               modifiers={[font({ size: 15 }), foregroundStyle(colors["muted-foreground"])]}
             >
-              模板：{template.vendor}
+              模板：{template?.name ?? "未知模板"}
             </Text>
-            {protocolEditable(instance) ? (
+            {protocolEditable(templates, provider) ? (
               <Picker
                 label="协议"
-                selection={instance.protocol}
+                selection={provider.protocol}
                 onSelectionChange={(next) => changeProtocol(next as Protocol)}
               >
-                {(
-                  ["openai-chat", "openai-responses", "anthropic-messages"] as Protocol[]
-                ).map((value) => (
+                {(template?.protocols ?? PROTOCOLS).map((value) => (
                   <Text key={value} modifiers={[tag(value)]}>
                     {PROTOCOL_LABEL[value]}
                   </Text>
@@ -193,7 +194,7 @@ export function InstancePage({
                   foregroundStyle(colors["muted-foreground"]),
                 ]}
               >
-                协议：{PROTOCOL_LABEL[instance.protocol]}
+                协议：{PROTOCOL_LABEL[provider.protocol]}
               </Text>
             )}
             <TextField
@@ -217,20 +218,21 @@ export function InstancePage({
             />
             {urlError === null ? null : <FieldError text={urlError} />}
             {!custom &&
-            instance.baseURL !== template.defaultBaseURL &&
-            isValidURL(instance.baseURL) ? (
+            template !== undefined &&
+            provider.baseURL !== template.baseURL &&
+            isValidURL(provider.baseURL) ? (
               <Button
                 label="恢复默认地址"
                 modifiers={[buttonStyle("plain")]}
                 onPress={() =>
-                  Alert.alert("恢复默认地址？", template.defaultBaseURL, [
+                  Alert.alert("恢复默认地址？", template.baseURL, [
                     { text: "取消", style: "cancel" },
                     {
                       text: "恢复",
                       onPress: () => {
-                        baseText.set(template.defaultBaseURL);
-                        setBaseURL(template.defaultBaseURL);
-                        patch({ baseURL: template.defaultBaseURL });
+                        baseText.set(template.baseURL);
+                        setBaseURL(template.baseURL);
+                        patch({ baseURL: template.baseURL });
                       },
                     },
                   ])
@@ -239,7 +241,7 @@ export function InstancePage({
             ) : null}
             <Toggle
               label="流式输出"
-              isOn={instance.stream}
+              isOn={provider.stream}
               onIsOnChange={(stream) => patch({ stream })}
             />
             <Text
@@ -248,7 +250,7 @@ export function InstancePage({
                 foregroundStyle(colors["muted-foreground"]),
               ]}
             >
-              ID: {instance.id}
+              ID: {provider.id}
             </Text>
           </Section>
 
@@ -269,7 +271,7 @@ export function InstancePage({
               <>
                 {models.map((model) => (
                   <SwipeActions key={model.id}>
-                    <NavigationLink value={`model/${instance.id}/${model.id}`}>
+                    <NavigationLink value={`model/${provider.id}/${model.id}`}>
                       <VStack alignment="leading" spacing={2}>
                         <Text modifiers={[font({ size: 16 })]}>{model.displayName}</Text>
                         <Text
@@ -295,7 +297,7 @@ export function InstancePage({
                               {
                                 text: "删除",
                                 style: "destructive",
-                                onPress: () => onDeleteModel(instance.id, model.id),
+                                onPress: () => onDeleteModel(provider.id, model.id),
                               },
                             ],
                           )
@@ -324,7 +326,7 @@ export function InstancePage({
             )}
           </Section>
 
-          <HeaderSection instance={instance} onUpdate={onUpdate} />
+          <HeaderSection provider={provider} onUpdate={onUpdate} />
 
           <Section title="危险操作">
             <Button
@@ -333,14 +335,14 @@ export function InstancePage({
               modifiers={[buttonStyle("plain")]}
               onPress={() =>
                 Alert.alert(
-                  `删除「${instance.name}」？`,
+                  `删除「${provider.name}」？`,
                   `此连接下的 ${models.length} 个模型配置将一并移除，且不可恢复。`,
                   [
                     { text: "取消", style: "cancel" },
                     {
                       text: "删除",
                       style: "destructive",
-                      onPress: () => onDelete(instance),
+                      onPress: () => onDelete(provider),
                     },
                   ],
                 )
@@ -355,13 +357,13 @@ export function InstancePage({
         candidates={candidates ?? []}
         existing={models.map((model) => model.id)}
         onClose={() => setCandidateOpen(false)}
-        onAdd={(ids) => onAddModels(instance.id, ids)}
+        onAdd={(ids) => onAddModels(provider.id, ids)}
       />
       <ModelSheet
         visible={modelOpen}
         onClose={() => setModelOpen(false)}
         onCreate={(id, displayName) => {
-          onAddModel(instance.id, {
+          onAddModel(provider.id, {
             id,
             displayName,
             note: "",
@@ -406,18 +408,18 @@ function fetchRow(
 }
 
 function HeaderSection({
-  instance,
+  provider,
   onUpdate,
 }: {
-  instance: Instance;
-  onUpdate: (instance: Instance) => void;
+  provider: ModelProvider;
+  onUpdate: (provider: ModelProvider) => void;
 }) {
   const [name, setName] = useState("");
   const [value, setValue] = useState("");
   const nameText = useNativeState("");
   const valueText = useNativeState("");
 
-  const patchHeaders = (headers: Header[]) => onUpdate({ ...instance, headers });
+  const patchHeaders = (headers: RequestHeader[]) => onUpdate({ ...provider, headers });
 
   return (
     <Section
@@ -425,32 +427,32 @@ function HeaderSection({
       footer={
         <Footer
           text={
-            instance.protocol === "anthropic-messages"
+            provider.protocol === "anthropic-messages"
               ? "anthropic-version 由协议自动注入，可用同名请求头覆盖。"
               : "请求头按原样发送；同名时自定义值覆盖自动注入值。"
           }
         />
       }
     >
-      {instance.protocol === "anthropic-messages" ? (
+      {provider.protocol === "anthropic-messages" ? (
         <Text
           modifiers={[font({ size: 13 }), foregroundStyle("#8a8a8e")]}
         >
           anthropic-version: 2023-06-01（自动）
         </Text>
       ) : null}
-      {instance.headers.map((header, index) => (
-        <HeaderRow
+      {provider.headers.map((header, index) => (
+        <RequestHeaderRow
           key={index}
           header={header}
           onChange={(next) => {
-            const headers = instance.headers.map((item, at) =>
+            const headers = provider.headers.map((item, at) =>
               at === index ? next : item,
             );
             patchHeaders(headers);
           }}
           onRemove={() =>
-            patchHeaders(instance.headers.filter((_, at) => at !== index))
+            patchHeaders(provider.headers.filter((_, at) => at !== index))
           }
         />
       ))}
@@ -460,18 +462,18 @@ function HeaderSection({
           if (trimmed === "") {
             return;
           }
-          const duplicate = instance.headers.some(
+          const duplicate = provider.headers.some(
             (item) => item.name.toLowerCase() === trimmed.toLowerCase(),
           );
           if (duplicate) {
             Alert.alert("请求头名称重复", "同一个请求头只保留一条。");
             return;
           }
-          patchHeaders([...instance.headers, { name: trimmed, value: next.value.trim() }]);
+          patchHeaders([...provider.headers, { name: trimmed, value: next.value.trim() }]);
         }}
       />
-      {instance.headers.some((header, at) =>
-        duplicateHeader(instance.headers.slice(0, at), header.name),
+      {provider.headers.some((header, at) =>
+        duplicateHeader(provider.headers.slice(0, at), header.name),
       ) ? (
         <FieldError text="请求头名称重复" />
       ) : null}
@@ -479,13 +481,13 @@ function HeaderSection({
   );
 }
 
-function HeaderRow({
+function RequestHeaderRow({
   header,
   onChange,
   onRemove,
 }: {
-  header: Header;
-  onChange: (header: Header) => void;
+  header: RequestHeader;
+  onChange: (header: RequestHeader) => void;
   onRemove: () => void;
 }) {
   const nameText = useNativeState(header.name);
@@ -495,7 +497,7 @@ function HeaderRow({
     <HStack spacing={8}>
       <TextField
         text={nameText}
-        placeholder="Header"
+        placeholder="RequestHeader"
         onTextChange={(next) => onChange({ ...header, name: next })}
         modifiers={[autocorrectionDisabled()]}
       />
@@ -512,7 +514,7 @@ function HeaderRow({
   );
 }
 
-function AddHeaderRow({ onAdd }: { onAdd: (header: Header) => void }) {
+function AddHeaderRow({ onAdd }: { onAdd: (header: RequestHeader) => void }) {
   const [name, setName] = useState("");
   const [value, setValue] = useState("");
   const nameText = useNativeState("");
@@ -520,7 +522,7 @@ function AddHeaderRow({ onAdd }: { onAdd: (header: Header) => void }) {
 
   return (
     <HStack spacing={8}>
-      <TextField text={nameText} placeholder="Header 名" onTextChange={setName} />
+      <TextField text={nameText} placeholder="RequestHeader 名" onTextChange={setName} />
       <TextField text={valueText} placeholder="值" onTextChange={setValue} />
       <Button
         modifiers={[buttonStyle("plain")]}

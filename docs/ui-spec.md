@@ -151,9 +151,9 @@ v13 曾把抽屉的出现方式放在 RN 侧自己实现（`Animated` 滑入 260
 | 插件（MCP）`/plugins` | 顶栏「插件」；两段：已连接 / 可添加；行：服务名 + 状态点（绿/灰/红）+ 工具数；详情页：工具列表（每行名称 + 开关）、连接信息、删除 |
 | 设置根（v27 现状） | 一个 `NavigationDestination value="settings"` 的系统页面：`Toolbar` 里只放 `List`（`insetGrouped`）+ `navigationTitle("设置")` + inline 标题；左上角返回箭头**由系统栈提供**（v20 起不再放自绘返回）。分组只有 **对话**（模型服务、智能体，右侧显示数量）与 **能力**（工具、MCP 服务、技能）；「通用」「关于」已按用户要求删除（v17）。每行是 `Label`（SF Symbol）+ 右侧值，chevron 由系统给 |
 | 设置二级页（v30 现状） | 每个能力都是 `NavigationDestination` 推入的系统页面，自带导航栏、返回箭头。智能体页仍是本次列表（轻点切当前、长按删除、右上角 +）；工具 / MCP / 技能三页先给占位与批次说明 |
-| 模型服务（v30） | 首页按模板分组（OpenAI / Anthropic / DeepSeek / 自定义，空组隐藏），行=名称 + 代理域名小字 + 「N 个模型」；右上角 `+` 是模板菜单（三个内置 + 自定义…），左滑删除。点行推入实例详情，再点模型推入模型详情 |
-| 实例详情（v30） | 四段：连接（名称、模板只读、协议条件可改、Base URL、API Key、恢复默认地址、流式开关、ID）；模型（空态给「获取模型」「手动添加模型」，有模型时列表可左滑删）；高级（自定义请求头键值对，Anthropic 的 `anthropic-version` 只读展示）；危险操作（删除此连接）。没有全局保存按钮，编辑即时落库 |
-| 创建实例（v30） | 底部抽屉：内置模板名称预填厂商、API Key 必填、协议锁定；自定义模板多一个协议 Picker，Key 可空。创建即落库并直接推入实例详情 |
+| 模型服务（v36） | 首页按模板行分组（OpenAI / Anthropic / DeepSeek / 自定义，空组隐藏），行=名称 + 代理域名小字 + 「N 个模型」；右上角 `+` 是模板菜单（条目由 `model_provider_template` 生成），左滑删除。点行推入连接详情，再点模型推入模型详情 |
+| 连接详情（v36） | 四段：连接（名称、模板只读、协议条件可改、Base URL、API Key、恢复默认地址、流式开关、ID）；模型（空态给「获取模型」「手动添加模型」，有模型时列表可左滑删）；高级（自定义请求头键值对，Anthropic 的 `anthropic-version` 只读展示）；危险操作（删除此连接）。没有全局保存按钮，编辑即时落库 |
+| 创建连接（v36） | 底部抽屉：内置模板名称预填默认名称、API Key 必填、协议锁定；自定义模板多一个协议 Picker，Key 可空。创建即落库并直接推入连接详情 |
 | 候选模型面板（v30） | 底部抽屉：搜索、全选、每个候选一个 Toggle，已添加的不再出现；「添加所选」才写入，拉取结果本身不改配置 |
 | 模型详情（v30） | 基础（ID 只读、显示名、备注）/ 容量（最大输出 token、上下文窗口）/ 思考（OpenAI 推理强度三档，Anthropic 预算 ≥1024 且小于最大输出 token）/ 采样（Temperature、Top P，Anthropic 上限 1）/ 输入模态（图像开关） |
 | 会话列表 | 不占整页：底部抽屉，见 §3 |
@@ -296,21 +296,21 @@ v24 把输入区做成浮层，再用它测出来的高度去补列表的 `paddi
 
 同时把「正在编辑的记录」与「抽屉是否打开」拆成两个状态（v30 是 `createTemplate` / `createOpen`）。原来关闭时立刻把记录清成 `null`，抽屉还在滑出的那 0.3 秒里表单已被重新 key 成空表单，字段会先闪成空白——现在关闭只关可见性，记录留到下一次打开时替换。
 
-## 21. v30：模型服务重构为 模板 → 实例 → 模型
+## 21. v30 → v36：模型服务重构为 模板 → 连接 → 模型
 
 按用户给的交互文档整体重做，旧的一层「Provider + 模型 id 字符串」结构全部替换：
 
-- **模板不是实体**：`TEMPLATES`（OpenAI / Anthropic / DeepSeek / 自定义）只决定创建时的默认名称、默认 Base URL、可用协议与首页分组。实例（`Instance`）才是管理对象，带不可变 `id` 与 `templateId`。
-- **三层页面**：模型服务首页按 `templateId` 分组（空组隐藏）→ 实例详情（连接 / 模型 / 高级 / 危险操作）→ 模型详情（基础 / 容量 / 思考 / 采样 / 输入模态）。三页都是设置栈里的 `NavigationDestination`，滑动返回仍由栈深决定。
+- **模板是数据**（v36 起）：`model_provider_template` 的行由 `src/state/seed.ts` 的种子 SQL 灌入，决定创建时的默认名称、默认 Base URL、可用协议与首页分组顺序；代码里不写厂商常量，新增厂商只改种子。连接（`ModelProvider`）才是管理对象，带不可变 `id` 与 `templateId`。
+- **三层页面**：模型服务首页按 `templateId` 分组（空组隐藏，模板行缺失的连接落「其他」组）→ 连接详情（连接 / 模型 / 高级 / 危险操作）→ 模型详情（基础 / 容量 / 思考 / 采样 / 输入模态）。三页都是设置栈里的 `NavigationDestination`，滑动返回仍由栈深决定。
 - **协议影响行为**：`openai-chat` / `openai-responses` / `anthropic-messages` 决定端点拼接、请求头注入、请求体字段、SSE 解析、模型参数显隐与校验；Anthropic 的 `budget_tokens ≥ 1024 且 < max_tokens`、temperature 上限 1 都只在对应协议下出现。
-- **校验与不可变项**：名称 trim 非空、Base URL 必须能解析；模型 ID 创建后只读；实例 ID 不在 UI 暴露；协议切换不删模型只提示。
-- **创建即落库、模型添加即落库**：模型参数每次编辑都进 reducer，仍由 300ms 防抖 + diff 写 SQLite；`modelUpdate` 与 `instanceUpdate` 对相同值返回原 state，避免无变化的编辑触发落库与重渲染。
-- **删除**：实例删除级联 `model_config` / `instance_secret` / `instance_header`；删除前都弹确认，并写明会连带删除多少模型。
+- **校验与不可变项**：名称 trim 非空、Base URL 必须能解析；模型 ID 创建后只读；连接 ID 不在 UI 暴露；协议切换不删模型只提示。
+- **创建即落库、模型添加即落库**：模型参数每次编辑都进 reducer，仍由 300ms 防抖 + diff 写 SQLite；`modelUpdate` 与 `providerUpdate` 对相同值返回原 state，避免无变化的编辑触发落库与重渲染。
+- **删除**：连接删除级联 `model_provider_model` / `model_provider_secret` / `model_provider_header`；删除前弹确认，并写明会连带删除多少模型。
 
 ## 22. v33：诊断日志页
 
 设置 → 能力 → 诊断日志。临时排查页，不是产品功能：
 
-- **网络自检**：直接向 `api.openai.com/v1/models` 发一个不带有效 Key 的 GET。拿到任何 HTTP 状态码都算「网络可用」；失败会显示失败阶段与宿主原文。它与用户的实例无关，用来区分「整个网络通道不通」和「Base URL / Key 不对」。
+- **网络自检**：直接向 `api.openai.com/v1/models` 发一个不带有效 Key 的 GET。拿到任何 HTTP 状态码都算「网络可用」；失败会显示失败阶段与宿主原文。它与用户的连接无关，用来区分「整个网络通道不通」和「Base URL / Key 不对」。
 - **最近日志**：`src/log.ts` 除了写 `debug.log`，还在内存里保留最近 200 行；这一页只读内存，文件桥坏了也能看。`installErrorCapture()` 在 `App.tsx` 模块加载时接管 RN 的全局错误处理器（并转交原来的处理器），未捕获异常也会进这个缓冲。
 - 日志行里的时间只到秒，不写 API Key，只写长度。

@@ -1,6 +1,6 @@
 import { readSSELine } from "../sse.ts";
 import { UTF8Decoder } from "../utf8.ts";
-import type { Protocol } from "../domain/service.ts";
+import type { Protocol } from "../domain/provider.ts";
 import { ChatFailure } from "./errors.ts";
 
 /**

@@ -29,11 +29,10 @@ import {
   baseURLError,
   protocolFooter,
   protocolPlaceholder,
-  type Instance,
+  type ModelProvider,
+  type ModelProviderTemplate,
   type Protocol,
-  templateOf,
-  type TemplateId,
-} from "../domain/service.ts";
+} from "../domain/provider.ts";
 import { SheetShell } from "./SheetShell.tsx";
 
 /**
@@ -41,23 +40,23 @@ import { SheetShell } from "./SheetShell.tsx";
  * templates lock the protocol and require a key; 自定义 exposes the protocol
  * picker and lets the key stay empty.
  */
-export function InstanceSheet({
+export function ProviderSheet({
   visible,
-  templateId,
+  template,
   onClose,
   onCreate,
 }: {
   visible: boolean;
-  templateId: TemplateId | null;
+  template: ModelProviderTemplate | null;
   onClose: () => void;
-  onCreate: (draft: Omit<Instance, "id">) => void;
+  onCreate: (draft: Omit<ModelProvider, "id">) => void;
 }) {
   return (
     <SheetShell visible={visible} onClose={onClose}>
-      {templateId === null ? null : (
+      {template === null ? null : (
         <CreateForm
-          key={templateId}
-          templateId={templateId}
+          key={template.id}
+          template={template}
           onCancel={onClose}
           onCreate={onCreate}
         />
@@ -67,25 +66,24 @@ export function InstanceSheet({
 }
 
 function CreateForm({
-  templateId,
+  template,
   onCancel,
   onCreate,
 }: {
-  templateId: TemplateId;
+  template: ModelProviderTemplate;
   onCancel: () => void;
-  onCreate: (draft: Omit<Instance, "id">) => void;
+  onCreate: (draft: Omit<ModelProvider, "id">) => void;
 }) {
-  const template = templateOf(templateId);
-  const custom = templateId === "custom";
+  const custom = template.custom;
 
   const [name, setName] = useState(template.defaultName);
   const [key, setKey] = useState("");
-  const [baseURL, setBaseURL] = useState(template.defaultBaseURL);
+  const [baseURL, setBaseURL] = useState(template.baseURL);
   const [protocol, setProtocol] = useState<Protocol>(template.protocol);
 
   const nameText = useNativeState(template.defaultName);
   const keyText = useNativeState("");
-  const baseText = useNativeState(template.defaultBaseURL);
+  const baseText = useNativeState(template.baseURL);
 
   const urlError = baseURLError(baseURL);
   const ready =
@@ -97,14 +95,14 @@ function CreateForm({
     <Toolbar>
       <Form
         modifiers={[
-          navigationTitle(custom ? "新建自定义连接" : `新建 ${template.vendor} 连接`),
+          navigationTitle(custom ? "新建自定义连接" : `新建 ${template.name} 连接`),
           navigationBarTitleDisplayMode("inline"),
         ]}
       >
         <Section>
           <TextField
             text={nameText}
-            placeholder={custom ? "例如：我的中转站" : template.vendor}
+            placeholder={custom ? "例如：我的中转站" : template.name}
             onTextChange={setName}
           />
           <SecureField
@@ -119,9 +117,7 @@ function CreateForm({
               selection={protocol}
               onSelectionChange={(next) => setProtocol(next as Protocol)}
             >
-              {(
-                ["openai-chat", "openai-responses", "anthropic-messages"] as Protocol[]
-              ).map((value) => (
+              {template.protocols.map((value) => (
                 <Text key={value} modifiers={[tag(value)]}>
                   {PROTOCOL_LABEL[value]}
                 </Text>
@@ -145,7 +141,7 @@ function CreateForm({
               {urlError ??
                 (custom
                   ? protocolFooter(protocol)
-                  : `仅用于 ${template.vendor} 官方 API Key，可修改 Base URL 走代理。`)}
+                  : `仅用于 ${template.name} 官方 API Key，可修改 Base URL 走代理。`)}
             </Text>
           }
         >
@@ -167,7 +163,7 @@ function CreateForm({
                 return;
               }
               onCreate({
-                templateId,
+                templateId: template.id,
                 name: name.trim(),
                 protocol,
                 baseURL: baseURL.trim(),
