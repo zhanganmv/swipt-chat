@@ -1,3 +1,6 @@
+import { readFileSync, readdirSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
 import { readSSELine } from "../src/sse.ts";
 import { UTF8Decoder } from "../src/utf8.ts";
 import {
@@ -1003,6 +1006,28 @@ check(
     "SELECT count(*) AS n FROM instance_header",
   ))?.n,
   0,
+);
+
+// `useNativeState` hands back a native shared object with exactly `value`,
+// `get`, `set` and `onChange`. It has no `clear()` and no `setText()`, and
+// calling either throws "undefined is not a function" from the mount effect of
+// the sheet that holds the field. The host then tears the whole screen down,
+// which reads like a network failure and is not one.
+const sourceRoot = fileURLToPath(new URL("../src", import.meta.url));
+const sourceFiles = readdirSync(sourceRoot, { recursive: true })
+  .map((entry) => String(entry))
+  .filter((entry) => entry.endsWith(".ts") || entry.endsWith(".tsx"));
+const forbiddenCalls = sourceFiles.flatMap((relative) =>
+  readFileSync(`${sourceRoot}/${relative}`, "utf8")
+    .split("\n")
+    .flatMap((line, index) =>
+      /\.(clear|setText)\(/.test(line) ? [`${relative}:${index + 1}`] : [],
+    ),
+);
+check(
+  "ui: native states are only reached through get/set",
+  forbiddenCalls,
+  [],
 );
 
 if (failed > 0) {

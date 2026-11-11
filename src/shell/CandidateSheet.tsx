@@ -50,7 +50,10 @@ export function CandidateSheet({
     if (visible) {
       setQuery("");
       setSelected([]);
-      queryText.clear();
+      // `useNativeState` exposes only `value` / `get` / `set` / `onChange`;
+      // a `clear()` here throws inside the sheet's mount effect and the host
+      // tears the whole screen down with "undefined is not a function".
+      queryText.set("");
     }
   }, [visible]);
 

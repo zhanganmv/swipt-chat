@@ -228,7 +228,7 @@ export function InstancePage({
                     {
                       text: "恢复",
                       onPress: () => {
-                        baseText.setText(template.defaultBaseURL);
+                        baseText.set(template.defaultBaseURL);
                         setBaseURL(template.defaultBaseURL);
                         patch({ baseURL: template.defaultBaseURL });
                       },
@@ -526,8 +526,8 @@ function AddHeaderRow({ onAdd }: { onAdd: (header: Header) => void }) {
         modifiers={[buttonStyle("plain")]}
         onPress={() => {
           onAdd({ name, value });
-          nameText.clear();
-          valueText.clear();
+          nameText.set("");
+          valueText.set("");
           setName("");
           setValue("");
         }}

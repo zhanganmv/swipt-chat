@@ -85,10 +85,11 @@
 
 ## 7. 测试口径
 
-- `npm test` 跑 `node --experimental-strip-types scripts/check.ts`，当前 **145 条断言**，覆盖 reducer 全分支、三种协议的 SSE/请求体/端点拼装、错误分类、迁移与恢复（含实例/模型两层、密钥拆分、activeId 失效回落、协议约束）。存储层直接跑真 SQLite（`node:sqlite`，同一套 SQL 方言），不是 JSON 假件：迁移幂等、级联删除、流式 token 只改一行、中断回复修复都有断言。
+- `npm test` 跑 `node --experimental-strip-types scripts/check.ts`，当前 **146 条断言**，覆盖 reducer 全分支、三种协议的 SSE/请求体/端点拼装、错误分类、迁移与恢复（含实例/模型两层、密钥拆分、activeId 失效回落、协议约束）。存储层直接跑真 SQLite（`node:sqlite`，同一套 SQL 方言），不是 JSON 假件：迁移幂等、级联删除、流式 token 只改一行、中断回复修复都有断言。
 - 断言用 `canon()` 规范化比较（键排序），不用裸 `JSON.stringify`——键序不该让测试变红。
 - 为了让 node 直接加载 ESM，`src/**` 的相对 import 一律写显式扩展名（`./x.ts` / `./x.tsx`），`tsconfig.json` 打开 `allowImportingTsExtensions`（配合 `noEmit`）。新增文件请沿用，否则 `npm test` 会报 `ERR_MODULE_NOT_FOUND`。
 - 纯模块才进测试；`useChat` 依赖 React，不在本机跑，真机验。
+- `useNativeState()` 返回的是原生 shared object，只有 `value` / `get` / `set` / `onChange` 四项，**没有 `clear()`、也没有 `setText()`**。误调这两个方法会在抽屉挂载的 effect 里抛 `undefined is not a function`，宿主把整个界面关掉并弹「无法打开 Swipt Chat」，看着像网络故障。断言里有一条源码扫描把它钉死（`ui: native states are only reached through get/set`）。
 
 ## 8. 现状与目标的差距
 

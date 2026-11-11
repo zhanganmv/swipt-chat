@@ -8,7 +8,7 @@
 
 ---
 
-## 0. 当前实现状态（2026-11-11，v34）
+## 0. 当前实现状态（2026-11-11，v35）
 
 > 引用规则：**UI 口径**以 `ui-spec.md` 的「当前基线」为准，**架构现状**以 `architecture.md` 为准；本文 §4 的「service + SQLite + pi」是目标形态，不是现状。
 
@@ -19,7 +19,7 @@
 - **智能体**：列表 + 新建 + 切换（`agent` 表）。
 - **会话**：新建/切换/重命名/删除，草稿独立落盘，杀进程可恢复（SQLite `swipt-chat.db`，v28 起；旧的 JSON 文件不再读写）。
 - **对话链路**：`src/api/turn.ts` 按实例协议请求（chat / responses / anthropic），流式（SSE）与非流式都通；没有实例时走 `src/dev/mock.ts` 本地 Mock。错误按 kind 分类并内联到消息。
-- **质量基线**：`tsc` 干净、`npm test` 145 条断言、`npm run build` 通过；bundle 依赖 8 项（v28 起多一个 `expo-sqlite`），全在运行时白名单内。
+- **质量基线**：`tsc` 干净、`npm test` 146 条断言、`npm run build` 通过；bundle 依赖 8 项（v28 起多一个 `expo-sqlite`），全在运行时白名单内。
 
 还没做（本文的重点，按 P1 起排）：`pi` 循环、extension service 常驻、内置工具 / MCP / Skills 的真实数据层、会话搜索（FTS5 已探测、搜索 UI 未做）。
 

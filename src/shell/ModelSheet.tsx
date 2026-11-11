@@ -55,8 +55,8 @@ function CreateModelForm({
     }
     setId("");
     setName("");
-    idText.clear();
-    nameText.clear();
+    idText.set("");
+    nameText.set("");
   }, [visible, idText, nameText]);
 
   const ready = id.trim() !== "";
@@ -77,7 +77,7 @@ function CreateModelForm({
               setId(next);
               if (name === "") {
                 setName(next);
-                nameText.setText(next);
+                nameText.set(next);
               }
             }}
             modifiers={[autocorrectionDisabled()]}
