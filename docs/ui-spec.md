@@ -306,6 +306,8 @@ v24 把输入区做成浮层，再用它测出来的高度去补列表的 `paddi
 - **校验与不可变项**：名称 trim 非空、Base URL 必须能解析；模型 ID 创建后只读；连接 ID 不在 UI 暴露；协议切换不删模型只提示。
 - **创建即落库、模型添加即落库**：模型参数每次编辑都进 reducer，仍由 300ms 防抖 + diff 写 SQLite；`modelUpdate` 与 `providerUpdate` 对相同值返回原 state，避免无变化的编辑触发落库与重渲染。
 - **删除**：连接删除级联 `model_provider_model` / `model_provider_secret` / `model_provider_header`；删除前弹确认，并写明会连带删除多少模型。
+- **路由值统一生成**（v37）：链接与目的地都用 `src/routes.ts` 的 `providerRoute()` / `providerModelRoute()`。原生目的地按值找 slot，找不到就渲染空页——链接仍可点，表现为「推入一整页空白」而不是报错；静态链接与目的地的一致性由 `scripts/check.ts` 的两条源码扫描兜底。
+- **候选面板冻结**（v37）：抽屉打开时把「可勾选的行」定住，添加模型不会在关闭动画期间把面板清空（否则下半屏会先变空白再收起）。
 
 ## 22. v33：诊断日志页
 

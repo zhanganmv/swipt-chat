@@ -1,6 +1,6 @@
 # 模型服务：模板 → 连接 → 模型
 
-- 版本：v36（2026-11-11）
+- 版本：v37（2026-11-11）
 - 依据：用户给的《模型服务 · 完整交互文档》
 - 代码：`src/domain/provider.ts`（类型与规则）、`src/state/seed.ts`（模板种子 SQL）、`src/api/protocol.ts`（协议适配）、`src/screens/{ProviderListPage,ProviderPage,ModelPage}.tsx`、`src/shell/{ProviderSheet,CandidateSheet,ModelSheet}.tsx`
 
@@ -25,6 +25,7 @@
 ```
 
 - 三页都是 `NavigationDestination`，滑动返回仍由栈深决定（`docs/architecture.md` §6）。
+- 路由值由 `src/routes.ts` 生成：`providers` / `providers/<connectionId>` / `providers/<connectionId>/models/<modelId>`。**链接和目的地必须是同一个字符串**——原生侧按值找目的地，找不到就渲染空视图，链接仍可点，结果是整页空白（v36 的 `provider/<id>` 与 `providers/<id>` 不一致就是这个症状）。
 - 首页分组顺序 = `model_provider_template.position`，**空组不渲染**；组 footer 写各组的用途（内置组只服务官方 Key，第三方端点进自定义组）。模板行缺失的连接落到末尾「其他」组，不会凭空消失。
 - 行：名称 + 代理域名副标题（仅当 host 与模板官方域名不同）+「N 个模型 / 未添加模型」。左滑删除，二次确认写明连带删除多少个模型。
 - 右上角 `+` 是原生 `Menu`，条目由模板行生成：`custom = 0` 的用模板名，`custom = 1` 的显示「名称…」。

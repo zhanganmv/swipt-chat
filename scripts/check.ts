@@ -1147,6 +1147,46 @@ check(
   [],
 );
 
+// A `NavigationLink` whose value has no matching `NavigationDestination` does
+// not fail loudly: the native destination resolves the value against the
+// registered slots and renders nothing, so the link pushes a blank page
+// (v36 shipped `provider/<id>` against a `providers/<id>` destination).
+// Routes are built in `src/routes.ts`; this scan keeps every static link paired
+// with a destination and keeps hand-written route strings out of the screens.
+const tsxSources = sourceFiles
+  .filter((entry) => entry.endsWith(".tsx"))
+  .map((entry) => ({
+    path: entry,
+    text: readFileSync(`${sourceRoot}/${entry}`, "utf8"),
+  }));
+const collect = (pattern: RegExp): { path: string; value: string }[] =>
+  tsxSources.flatMap(({ path, text }) =>
+    Array.from(text.matchAll(pattern), (match) => ({ path, value: match[1] })),
+  );
+const destinations = new Set(
+  collect(/<NavigationDestination\b[^>]*value="([^"]*)"/g).map((hit) => hit.value),
+);
+const unmatchedLinks = [
+  ...collect(/<NavigationLink\b[^>]*value="([^"]*)"/g),
+  ...collect(/<Row\b[^>]*value="([^"]*)"/g),
+]
+  .filter((hit) => !destinations.has(hit.value))
+  .map((hit) => `${hit.path}: ${hit.value}`);
+check("ui: every static navigation link has a destination", unmatchedLinks, []);
+
+const dynamicRoutes = tsxSources
+  .flatMap(({ path, text }) =>
+    Array.from(
+      text.matchAll(/<NavigationLink\b[^>]*value=\{`/g),
+      () => path,
+    ),
+  );
+check(
+  "ui: route strings are built by src/routes.ts, not in a link",
+  dynamicRoutes,
+  [],
+);
+
 if (failed > 0) {
   process.exit(1);
 }

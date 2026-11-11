@@ -22,6 +22,7 @@ import { ProviderSheet } from "./shell/ProviderSheet.tsx";
 import { SessionListSheet, type SessionRow } from "./shell/SessionListSheet.tsx";
 import { useChat } from "./state/useChat.ts";
 import { installErrorCapture } from "./log.ts";
+import { PROVIDERS_ROUTE, providerRoute, settingsPath } from "./routes.ts";
 import { ThemeProvider, useTheme } from "./theme/index.tsx";
 
 // One-time: uncaught errors go to the in-memory log the diagnostics page reads.
@@ -75,7 +76,7 @@ function Shell() {
   // rather than letting the next page inherit it.
   const openSettings = useCallback(() => {
     Keyboard.dismiss();
-    setPath(["settings"]);
+    setPath(settingsPath());
   }, []);
   const openAgents = useCallback(() => {
     Keyboard.dismiss();
@@ -104,14 +105,14 @@ function Shell() {
     (draft: Omit<ModelProvider, "id">) => {
       const id = actions.addProvider(draft);
       setCreateOpen(false);
-      setPath(["settings", "providers", `providers/${id}`]);
+      setPath(settingsPath(PROVIDERS_ROUTE, providerRoute(id)));
     },
     [actions],
   );
   const deleteProvider = useCallback(
     (provider: ModelProvider) => {
       actions.removeProvider(provider.id);
-      setPath(["settings", "providers"]);
+      setPath(settingsPath(PROVIDERS_ROUTE));
     },
     [actions],
   );

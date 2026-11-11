@@ -38,6 +38,17 @@ import {
 import type { Agent } from "../domain/types.ts";
 import type { ChatActions } from "../state/useChat.ts";
 import { useTheme } from "../theme/index.tsx";
+import {
+  AGENTS_ROUTE,
+  DIAGNOSTICS_ROUTE,
+  MCP_ROUTE,
+  PROVIDERS_ROUTE,
+  SETTINGS_ROUTE,
+  SKILLS_ROUTE,
+  TOOLS_ROUTE,
+  providerModelRoute,
+  providerRoute,
+} from "../routes.ts";
 import { ProviderPage } from "./ProviderPage.tsx";
 import { ModelPage } from "./ModelPage.tsx";
 import { DiagnosticsPage } from "./DiagnosticsPage.tsx";
@@ -93,7 +104,7 @@ export const SettingsPages = memo(function SettingsPages({
 
   return (
     <>
-      <NavigationDestination value="settings">
+      <NavigationDestination value={SETTINGS_ROUTE}>
         <Toolbar>
             <List
               modifiers={[
@@ -104,13 +115,13 @@ export const SettingsPages = memo(function SettingsPages({
             >
               <Section title="对话">
                 <Row
-                  value="providers"
+                  value={PROVIDERS_ROUTE}
                   title="模型服务"
                   icon="server.rack"
                   trailing={`${providers.length}`}
                 />
                 <Row
-                  value="agents"
+                  value={AGENTS_ROUTE}
                   title="智能体"
                   icon="person.crop.circle"
                   trailing={`${agents.length}`}
@@ -121,11 +132,11 @@ export const SettingsPages = memo(function SettingsPages({
                 title="能力"
                 footer={<Footer text={`共 ${sessionCount} 个会话`} />}
               >
-                <Row value="tools" title="工具" icon="wrench.and.screwdriver" />
-                <Row value="mcp" title="MCP 服务" icon="shippingbox" />
-                <Row value="skills" title="技能" icon="sparkles" />
+                <Row value={TOOLS_ROUTE} title="工具" icon="wrench.and.screwdriver" />
+                <Row value={MCP_ROUTE} title="MCP 服务" icon="shippingbox" />
+                <Row value={SKILLS_ROUTE} title="技能" icon="sparkles" />
                 <Row
-                  value="diagnostics"
+                  value={DIAGNOSTICS_ROUTE}
                   title="诊断日志"
                   icon="doc.text.magnifyingglass"
                 />
@@ -134,7 +145,7 @@ export const SettingsPages = memo(function SettingsPages({
           </Toolbar>
       </NavigationDestination>
 
-      <NavigationDestination value="providers">
+      <NavigationDestination value={PROVIDERS_ROUTE}>
         <ProviderListPage
           templates={templates}
           providers={providers}
@@ -145,7 +156,7 @@ export const SettingsPages = memo(function SettingsPages({
       </NavigationDestination>
 
       {providers.map((provider) => (
-        <NavigationDestination key={provider.id} value={`providers/${provider.id}`}>
+        <NavigationDestination key={provider.id} value={providerRoute(provider.id)}>
           <ProviderPage
             templates={templates}
             provider={provider}
@@ -168,7 +179,7 @@ export const SettingsPages = memo(function SettingsPages({
         (models[provider.id] ?? []).map((model) => (
           <NavigationDestination
             key={`${provider.id}/${model.id}`}
-            value={`providers/${provider.id}/models/${model.id}`}
+            value={providerModelRoute(provider.id, model.id)}
           >
             <ModelPage
               provider={provider}
@@ -179,7 +190,7 @@ export const SettingsPages = memo(function SettingsPages({
         )),
       )}
 
-          <NavigationDestination value="agents">
+          <NavigationDestination value={AGENTS_ROUTE}>
             <Toolbar>
               <List
                 modifiers={[
@@ -243,7 +254,7 @@ export const SettingsPages = memo(function SettingsPages({
             </Toolbar>
           </NavigationDestination>
 
-          <NavigationDestination value="tools">
+          <NavigationDestination value={TOOLS_ROUTE}>
             <Placeholder
               title="工具"
               note="内置工具走 Swipt 的设备能力（截图、点击、前台应用），随 P3 批次接入"
@@ -251,7 +262,7 @@ export const SettingsPages = memo(function SettingsPages({
             />
           </NavigationDestination>
 
-          <NavigationDestination value="mcp">
+          <NavigationDestination value={MCP_ROUTE}>
             <Placeholder
               title="MCP 服务"
               note="MCP 客户端按 JSON-RPC 手写实现，一期不做 OAuth，随 P4 批次接入"
@@ -259,7 +270,7 @@ export const SettingsPages = memo(function SettingsPages({
             />
           </NavigationDestination>
 
-          <NavigationDestination value="skills">
+          <NavigationDestination value={SKILLS_ROUTE}>
             <Placeholder
               title="技能"
               note="技能是带 SKILL.md 的目录，支持 URL 导入与粘贴导入，随 P5 批次接入"
@@ -267,7 +278,7 @@ export const SettingsPages = memo(function SettingsPages({
             />
           </NavigationDestination>
 
-          <NavigationDestination value="diagnostics">
+          <NavigationDestination value={DIAGNOSTICS_ROUTE}>
             <DiagnosticsPage onSelfTest={onSelfTest} />
           </NavigationDestination>
     </>

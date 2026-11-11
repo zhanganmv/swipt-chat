@@ -53,6 +53,7 @@ import { useTheme } from "../theme/index.tsx";
 import { CandidateSheet } from "../shell/CandidateSheet.tsx";
 import { ModelSheet } from "../shell/ModelSheet.tsx";
 import { FieldError, Footer, Muted } from "./parts.tsx";
+import { providerModelRoute } from "../routes.ts";
 
 /**
  * 连接详情: connection fields, model list, custom headers, delete.
@@ -271,7 +272,7 @@ export function ProviderPage({
               <>
                 {models.map((model) => (
                   <SwipeActions key={model.id}>
-                    <NavigationLink value={`model/${provider.id}/${model.id}`}>
+                    <NavigationLink value={providerModelRoute(provider.id, model.id)}>
                       <VStack alignment="leading" spacing={2}>
                         <Text modifiers={[font({ size: 16 })]}>{model.displayName}</Text>
                         <Text

@@ -57,10 +57,24 @@ export function CandidateSheet({
     }
   }, [visible]);
 
-  const have = new Set(existing);
+  // The selectable rows are frozen when the sheet opens. Adding models writes
+  // them into `existing`, and filtering live would empty the panel while its
+  // dismissal animation is still running — the sheet then looks like a blank
+  // half-screen rather than a closed one.
+  const [openRows, setOpenRows] = useState<readonly string[]>([]);
+  useEffect(() => {
+    if (!visible) {
+      return;
+    }
+    const have = new Set(existing);
+    setOpenRows(candidates.filter((id) => !have.has(id)));
+    // `existing` is deliberately not a dependency: it changes when 添加所选
+    // lands, and that must not shrink the panel under the user's finger.
+  }, [visible, candidates]);
+
   const needle = query.trim().toLowerCase();
-  const rows = candidates.filter(
-    (id) => !have.has(id) && (needle === "" || id.toLowerCase().includes(needle)),
+  const rows = openRows.filter(
+    (id) => needle === "" || id.toLowerCase().includes(needle),
   );
   const allSelected = rows.length > 0 && rows.every((id) => selected.includes(id));
 

@@ -31,6 +31,7 @@ import {
 } from "../domain/provider.ts";
 import { useTheme } from "../theme/index.tsx";
 import { Footer, Muted } from "./parts.tsx";
+import { providerRoute } from "../routes.ts";
 
 interface Group {
   key: string;
@@ -122,11 +123,11 @@ export function ProviderListPage({
                 const count = modelCountLabel(models[provider.id]?.length ?? 0);
                 return (
                   <SwipeActions key={provider.id}>
-                    <NavigationLink value={`provider/${provider.id}`}>
+                    <NavigationLink value={providerRoute(provider.id)}>
                       <HStack spacing={12}>
                         <VStack alignment="leading" spacing={2}>
                           <Text modifiers={[font({ size: 16 })]}>{provider.name}</Text>
-                          {proxy === null ? null : (
+                          {proxy === "" ? null : (
                             <Text
                               modifiers={[
                                 font({ size: 13 }),
